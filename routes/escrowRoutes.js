@@ -1,11 +1,11 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { authenticateToken } = require('../middlewares/authMiddleware');
+const { authenticateToken } = require("../middlewares/authMiddleware");
 const {
   validateEscrowCreation,
   checkEscrowPermission,
-  checkEscrowAction
-} = require('../middlewares/escrowMiddleware');
+  checkEscrowAction,
+} = require("../middlewares/escrowMiddleware");
 const {
   createEscrow,
   getEscrows,
@@ -14,75 +14,61 @@ const {
   releaseEscrow,
   refundEscrow,
   disputeEscrow,
-  cancelEscrow
-} = require('../controllers/escrowController');
+  cancelEscrow,
+} = require("../Controllers/escrowController");
 
 // Create a new escrow
-router.post(
-  '/',
-  authenticateToken,
-  validateEscrowCreation,
-  createEscrow
-);
+router.post("/", authenticateToken, validateEscrowCreation, createEscrow);
 
 // Get all escrows for the authenticated user
-router.get(
-  '/',
-  authenticateToken,
-  getEscrows
-);
+router.get("/", authenticateToken, getEscrows);
 
 // Get a specific escrow by ID
-router.get(
-  '/:id',
-  authenticateToken,
-  checkEscrowPermission,
-  getEscrowById
-);
+router.get("/:id", authenticateToken, checkEscrowPermission, getEscrowById);
 
 // Fund an escrow
 router.post(
-  '/:id/fund',
+  "/:id/fund",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction('fund'),
-  fundEscrow
+  checkEscrowAction("fund"),
+  fundEscrow,
 );
 
 // Release escrow funds
 router.post(
-  '/:id/release',
+  "/:id/release",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction('release'),
-  releaseEscrow
+  checkEscrowAction("release"),
+  releaseEscrow,
 );
 
 // Refund escrow
 router.post(
-  '/:id/refund',
+  "/:id/refund",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction('refund'),
-  refundEscrow
+  checkEscrowAction("refund"),
+  refundEscrow,
 );
 
 // Dispute an escrow
 router.post(
-  '/:id/dispute',
+  "/:id/dispute",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction('dispute'),
-  disputeEscrow
+  checkEscrowAction("dispute"),
+  disputeEscrow,
 );
 
 // Cancel an escrow
 router.post(
-  '/:id/cancel',
+  "/:id/cancel",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction('cancel'),
-  cancelEscrow
+  checkEscrowAction("cancel"),
+  cancelEscrow,
 );
 
-module.exports = router; 
+module.exports = router;
