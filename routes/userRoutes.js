@@ -42,17 +42,13 @@ router.get("/test-email", async (req, res) => {
 });
 
 // Route for personal user registration
-router.post(
-  "/register",
-  validatePersonalRegistration,
-  userController.registerUser,
-);
+router.post("/register", validateUser, userController.registerUser);
 
 // Route for all other account types (Merchant, NGO, Government)
 // Using the full validateUser middleware that checks all fields
-router.post("/register/merchant", validateUser, userController.registerUser);
-router.post("/register/ngo", validateUser, userController.registerUser);
-router.post("/register/government", validateUser, userController.registerUser);
+// router.post("/register/merchant", validateUser, userController.registerUser);
+// router.post("/register/ngo", validateUser, userController.registerUser);
+// router.post("/register/government", validateUser, userController.registerUser);
 
 // Login route
 router.post("/login", userController.loginUser);
