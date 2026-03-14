@@ -1,17 +1,17 @@
-const cron = require('node-cron');
-const { checkQuoteNotifications } = require('../controllers/rfqController');
+const cron = require("node-cron");
+const { checkQuoteNotifications } = require("../Controllers/rfqController");
 
 // Run the notification check every hour
 const startQuoteNotificationCron = () => {
-  cron.schedule('0 * * * *', async () => {
+  cron.schedule("0 * * * *", async () => {
     try {
-      console.log('Running quote notification check...');
+      console.log("Running quote notification check...");
       await checkQuoteNotifications();
-      console.log('Quote notification check completed');
+      console.log("Quote notification check completed");
     } catch (error) {
-      console.error('Error in quote notification cron job:', error);
+      console.error("Error in quote notification cron job:", error);
     }
   });
 };
 
-module.exports = startQuoteNotificationCron; 
+module.exports = startQuoteNotificationCron;
