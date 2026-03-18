@@ -23,8 +23,6 @@ const registerUser = async (req, res) => {
       password,
       accountType,
       country,
-
-      // merchant
       businessName,
       industry,
       companyAddress,
@@ -36,11 +34,19 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: "Email already registered" });
     }
 
+    // Validate password
+    if (!password || password.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Email verification token
-    const emailVerificationToken = crypto.randomBytes(32).toString("hex");
+    // 🔥 Generate OTP
+    const { generateOTP, sendOTPEmail } = require("../services/emailService");
+    const otp = generateOTP();
 
     let userData = {
       email,
@@ -49,7 +55,10 @@ const registerUser = async (req, res) => {
       country,
       emailVerified: false,
       status_client: "Inactive",
-      emailVerificationToken,
+
+      // ✅ OTP fields
+      otp,
+      otpExpires: Date.now() + 10 * 60 * 1000, // 10 mins
     };
 
     // PERSONAL ACCOUNT
@@ -98,20 +107,18 @@ const registerUser = async (req, res) => {
     const newUser = new User(userData);
     await newUser.save();
 
-    // Send verification email
-    try {
-      await emailService.sendVerificationEmail(email, emailVerificationToken);
-      console.log("✅ Verification email sent");
-    } catch (emailError) {
-      console.error("Email sending failed:", emailError.message);
-    }
+    // 🔥 Send OTP (DO NOT BLOCK USER CREATION)
+    sendOTPEmail(email, otp).catch((err) => {
+      console.error("❌ OTP email failed:", err.message);
+    });
 
     const userResponse = newUser.toObject();
     delete userResponse.password;
-    delete userResponse.emailVerificationToken;
+    delete userResponse.otp;
+    delete userResponse.otpExpires;
 
     res.status(201).json({
-      message: "User registered successfully. Verify your email.",
+      message: "User registered successfully. OTP sent to email.",
       user: userResponse,
       requiresVerification: true,
     });
