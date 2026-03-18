@@ -46,9 +46,14 @@ const userSchema = new Schema({
     default: false,
   },
 
-  emailVerificationToken: {
+  otp: {
     type: String,
-    default: "",
+    default: null,
+  },
+
+  otpExpires: {
+    type: Date,
+    default: null,
   },
 
   resetPasswordToken: {
