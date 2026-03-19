@@ -3,11 +3,13 @@ const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+console.log("✅ Resend initialized", process.env.RESEND_API_KEY);
+
 // ✅ Reusable sender
 const sendEmail = async ({ to, subject, html }) => {
   try {
     const response = await resend.emails.send({
-      from: "PatchPay <onboarding@resend.dev>",
+      from: "PatchPay <patchpaynig@gmail.com>",
       to,
       subject,
       html,
