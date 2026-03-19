@@ -9,7 +9,7 @@ console.log("✅ Resend initialized", process.env.RESEND_API_KEY);
 const sendEmail = async ({ to, subject, html }) => {
   try {
     const response = await resend.emails.send({
-      from: "PatchPay <patchpaynig@gmail.com>",
+      from: "PatchPay <onboarding@resend.dev>",
       to,
       subject,
       html,
