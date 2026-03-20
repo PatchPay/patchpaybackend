@@ -282,7 +282,7 @@ const loginUser = async (req, res) => {
 // Email verification function
 const verifyEmail = async (req, res) => {
   try {
-    const { email, otp } = req.query;
+    const { email, otp } = req.body;
 
     console.log(`🔄 Verifying email for: ${email} with Otp: ${otp}`);
 
