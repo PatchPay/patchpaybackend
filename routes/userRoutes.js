@@ -54,7 +54,7 @@ router.post("/register", validateUser, userController.registerUser);
 router.post("/login", userController.loginUser);
 
 // Email verification route
-router.get("/verify-email", userController.verifyEmail);
+router.post("/verify-email", userController.verifyEmail);
 
 // TEMPORARY TEST ROUTE for direct login (REMOVE IN PRODUCTION)
 router.post("/test-login", async (req, res) => {
