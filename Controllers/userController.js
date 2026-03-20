@@ -295,7 +295,7 @@ const verifyEmail = async (req, res) => {
       email,
       otp: otp,
       otpExpires: { $gt: Date.now() },
-      emailVerified: false,
+      // emailVerified: false,
     });
 
     if (!user) {
