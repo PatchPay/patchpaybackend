@@ -371,6 +371,63 @@ const verifyEmail = async (req, res) => {
   }
 };
 
+const resendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    console.log(`🔄 Resending OTP for: ${email}`);
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.status(400).json({
+        message: "Email already verified",
+      });
+    }
+
+    // 🔥 Generate new OTP
+    const { generateOTP, sendOTPEmail } = require("../services/emailService");
+    const newOtp = generateOTP();
+
+    // 🔥 Update user
+    user.otp = newOtp;
+    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 mins
+
+    await user.save();
+
+    // 🔥 Send email (non-blocking)
+    sendOTPEmail(email, newOtp).catch((err) => {
+      console.error("❌ Failed to resend OTP:", err.message);
+    });
+
+    console.log(`✅ OTP resent successfully to: ${email}`);
+
+    return res.status(200).json({
+      message: "OTP resent successfully",
+      success: true,
+    });
+  } catch (error) {
+    console.error("❌ Resend OTP error:", error);
+
+    return res.status(500).json({
+      message: "Error resending OTP",
+      error: error.message,
+    });
+  }
+};
+
 // Add a logout controller function
 const logout = async (req, res) => {
   try {
@@ -474,6 +531,7 @@ module.exports = {
   registerUser,
   loginUser,
   verifyEmail,
+  resendOtp,
   logout,
   getUserProfile,
   updateUserProfile,
