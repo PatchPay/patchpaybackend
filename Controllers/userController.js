@@ -280,7 +280,6 @@ const loginUser = async (req, res) => {
 };
 
 // Email verification function
-const crypto = require("crypto");
 
 // Generate random account number
 const generateAccountNumber = () => {
