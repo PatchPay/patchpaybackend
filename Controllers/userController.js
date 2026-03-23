@@ -282,11 +282,11 @@ const loginUser = async (req, res) => {
 // Email verification function
 
 // Generate random account number
-const generateAccountNumber = () => {
-  const prefix = "432";
-  const randomPart = crypto.randomInt(1000000, 9999999); // 7 digits
-  return prefix + randomPart; // e.g. 4321234567
-};
+// const generateAccountNumber = () => {
+//   const prefix = "432";
+//   const randomPart = crypto.randomInt(1000000, 9999999); // 7 digits
+//   return prefix + randomPart; // e.g. 4321234567
+// };
 
 // Ensure uniqueness
 const generateUniqueAccountNumber = async () => {
