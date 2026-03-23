@@ -280,6 +280,32 @@ const loginUser = async (req, res) => {
 };
 
 // Email verification function
+const crypto = require("crypto");
+
+// Generate random account number
+const generateAccountNumber = () => {
+  const prefix = "432";
+  const randomPart = crypto.randomInt(1000000, 9999999); // 7 digits
+  return prefix + randomPart; // e.g. 4321234567
+};
+
+// Ensure uniqueness
+const generateUniqueAccountNumber = async () => {
+  let accountNumber;
+  let exists = true;
+
+  while (exists) {
+    accountNumber = generateAccountNumber();
+
+    const existing = await Wallet.findOne({ accountNumber });
+    if (!existing) {
+      exists = false;
+    }
+  }
+
+  return accountNumber;
+};
+
 const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -290,12 +316,10 @@ const verifyEmail = async (req, res) => {
       return res.status(400).json({ message: "Invalid verification link" });
     }
 
-    // Find user by email and token
     const user = await User.findOne({
       email,
       otp: otp,
       otpExpires: { $gt: Date.now() },
-      // emailVerified: false,
     });
 
     if (!user) {
@@ -305,45 +329,40 @@ const verifyEmail = async (req, res) => {
         .json({ message: "Invalid or expired verification link" });
     }
 
-    // Update user to verified and active status
+    // ✅ Mark verified
     user.emailVerified = true;
     user.status_client = "Active";
-    user.emailVerificationToken = ""; // Clear the token
+
+    // ✅ Clear OTP properly (FIXED)
+    user.otp = null;
+    user.otpExpires = null;
+
     await user.save();
 
-    // Check if user already has a wallet
+    // Check if wallet exists
     let userWallet = await Wallet.findOne({ userId: user._id });
 
-    // If no wallet exists, create one with a unique account number
     if (!userWallet) {
       console.log(`🏦 Creating wallet for newly verified user: ${user._id}`);
 
-      // Generate unique account number using user's country code
-      const accountNumber = generateAccountNumber(user.countryCode);
+      // ✅ NEW: Generate unique account number
+      const accountNumber = await generateUniqueAccountNumber();
 
-      // Determine currency based on user's country
+      // Currency logic (unchanged)
       let currency;
       try {
-        // Import the getCurrencyForUser function
         const { getCurrencyForUser } = require("../utils/transactionFeeUtils");
-
-        // Determine currency based on user data
         currency = getCurrencyForUser(user);
+
         console.log(
-          `🌐 Determined currency ${currency} for user based on country: ${user.country} (${user.countryCode})`,
+          `🌐 Determined currency ${currency} for user based on country: ${user.country}`,
         );
       } catch (currencyError) {
         console.error(
           `❌ Error determining currency: ${currencyError.message}`,
         );
-        // Continue with wallet creation but log the error
-        console.error(
-          `❌ Will fall back to default currency handling in wallet controller later.`,
-        );
-        // We don't return an error here since we don't want to block email verification
       }
 
-      // Create new wallet with proper currency
       userWallet = new Wallet({
         userId: user._id,
         accountNumber,
@@ -353,21 +372,23 @@ const verifyEmail = async (req, res) => {
       });
 
       await userWallet.save();
+
       console.log(
-        `💰 Wallet created successfully with account number: ${accountNumber} and currency: ${currency}`,
+        `💰 Wallet created successfully with account number: ${accountNumber}`,
       );
     }
 
     console.log(`✅ Email verified successfully for user: ${email}`);
 
-    res
-      .status(200)
-      .json({ message: "Email verified successfully. You can now log in." });
+    res.status(200).json({
+      message: "Email verified successfully. You can now log in.",
+    });
   } catch (error) {
     console.error("❌ Email verification error:", error);
-    res
-      .status(500)
-      .json({ message: "Error verifying email", error: error.message });
+    res.status(500).json({
+      message: "Error verifying email",
+      error: error.message,
+    });
   }
 };
 
