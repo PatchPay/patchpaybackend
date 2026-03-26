@@ -72,6 +72,22 @@ app.use((req, res) => {
   });
 });
 
+app.get("/api", (req, res) => {
+  res.json({
+    success: true,
+    message: "Welcome to PatchPay API",
+    routes: {
+      users: "/api/users",
+      wallet: "/api/wallet",
+      payments: "/api/payments",
+      rfq: "/api/rfq",
+      escrow: "/api/escrow",
+      escrowTransactions: "/api/escrow-transactions",
+      notifications: "/api/notifications",
+    },
+  });
+});
+
 // Start Server
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
