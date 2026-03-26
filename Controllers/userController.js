@@ -23,6 +23,7 @@ const registerUser = async (req, res) => {
       password,
       accountType,
       country,
+      countryCode,
       businessName,
       industry,
       companyAddress,
@@ -41,6 +42,12 @@ const registerUser = async (req, res) => {
       });
     }
 
+    if (!country || !countryCode) {
+      return res.status(400).json({
+        message: "country and countryCode are required",
+      });
+    }
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -53,6 +60,7 @@ const registerUser = async (req, res) => {
       password: hashedPassword,
       accountType,
       country,
+      countryCode,
       emailVerified: false,
       status_client: "Inactive",
 
