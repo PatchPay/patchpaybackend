@@ -32,7 +32,13 @@ console.log(
 );
 
 // Middleware
+
 app.use(cors());
+// ⚠️ Webhook raw body MUST be before express.json()
+app.use(
+  "/api/payments/deposit/webhook",
+  express.raw({ type: "application/json" }),
+);
 app.use(express.json()); // Replaces bodyParser.json()
 app.use(express.urlencoded({ extended: true })); // Parses form data
 
