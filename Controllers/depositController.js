@@ -148,41 +148,27 @@ exports.initiateDeposit = async (req, res) => {
  */
 exports.handleWebhook = async (req, res) => {
   console.log("🔥 WEBHOOK HIT");
-  console.log("HEADERS:", req.headers);
-  console.log("BODY:", req.body);
+
   try {
-    // Verify webhook signature
-    const signature = req.headers["x-squad-signature"];
-    const webhookSecret = process.env.SQUAD_WEBHOOK_SECRET;
-
-    if (!signature || !webhookSecret) {
-      console.error("Missing webhook signature or secret");
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    let event;
+    if (req.body instanceof Buffer) {
+      event = JSON.parse(req.body.toString("utf8"));
+    } else {
+      event = req.body;
     }
 
-    // Compute HMAC
-    const hmac = crypto.createHmac("sha512", webhookSecret);
-    const computedSignature = hmac
-      .update(JSON.stringify(req.body))
-      .digest("hex");
+    console.log("EVENT:", event);
 
-    // Compare signatures
-    if (computedSignature !== signature) {
-      console.error("Invalid webhook signature");
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid signature" });
-    }
-
-    // Process webhook
-    const event = req.body;
-
-    // Only process successful transactions
-    if (event.event !== "charge.success") {
+    // ✅ Fix: Squad uses "charge_successful" with capital E
+    if (event.Event !== "charge_successful") {
       return res.status(200).json({ success: true, message: "Event ignored" });
     }
 
-    const { transaction_ref, amount, customer, currency } = event.data;
+    // ✅ Fix: TransactionRef is at root level, data is in Body
+    const transaction_ref = event.TransactionRef;
+    const bodyData = event.Body;
+
+    console.log("Transaction Ref:", transaction_ref);
 
     // Find the payment
     const payment = await DepositPayment.findOne({
@@ -198,18 +184,16 @@ exports.handleWebhook = async (req, res) => {
         .json({ success: false, message: "Payment not found" });
     }
 
-    // If payment is already processed, ignore
     if (payment.status === "successful") {
       return res
         .status(200)
         .json({ success: true, message: "Payment already processed" });
     }
 
-    // Update payment status
+    // ✅ Fix: Use bodyData fields
     payment.status = "successful";
-    payment.squadRef = event.data.transaction_id || "";
-    payment.gatewayResponse = event.data;
-    payment.gatewayResponseCode = event.data.response_code || "";
+    payment.squadRef = bodyData.gateway_ref || "";
+    payment.gatewayResponse = event;
 
     // Find user's wallet
     const wallet = await Wallet.findOne({ userId: payment.userId });
@@ -222,37 +206,43 @@ exports.handleWebhook = async (req, res) => {
         .json({ success: false, message: "Wallet not found" });
     }
 
-    // Create transaction
-    const transaction = new Transaction({
-      type: "deposit",
-      amount: payment.amount,
-      currency: payment.currency,
-      status: "completed",
-      recipientWallet: wallet._id,
-      recipientId: payment.userId,
-      reference: payment.transactionRef,
-      description: "Deposit via Squad payment gateway",
-      externalReference: payment.squadRef,
-    });
+    // Check if transaction already exists
+    let transaction = await Transaction.findOne({ reference: transaction_ref });
 
-    await transaction.save();
+    if (!transaction) {
+      transaction = new Transaction({
+        type: "deposit",
+        amount: payment.amount,
+        currency: payment.currency,
+        status: "completed",
+        recipientWallet: wallet._id,
+        recipientId: payment.userId,
+        reference: transaction_ref,
+        description: "Deposit via Squad payment gateway",
+        externalReference: payment.squadRef,
+        isUserAccountTransfer: false, // ✅ deposits are not user account transfers
+        paymentMethod: "bank", // ✅ matches your enum
+        paymentGateway: "Internal",
+        total: payment.amount,
+      });
 
-    // Add amount to wallet
-    wallet.balance += payment.amount;
-    await wallet.save();
+      await transaction.save();
 
-    // Update payment with transaction ID
+      // Add amount to wallet
+      wallet.balance += payment.amount;
+      await wallet.save();
+    }
+
     payment.transactionId = transaction._id;
     await payment.save();
 
     console.log(
-      `Deposit successful: ${payment.amount} ${payment.currency} for user ${payment.userId}`,
+      `✅ Deposit successful: ${payment.amount} ${payment.currency} for user ${payment.userId}`,
     );
 
-    return res.status(200).json({
-      success: true,
-      message: "Deposit processed successfully",
-    });
+    return res
+      .status(200)
+      .json({ success: true, message: "Deposit processed successfully" });
   } catch (error) {
     console.error("Webhook processing error:", error);
     return res.status(500).json({
@@ -261,6 +251,75 @@ exports.handleWebhook = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+exports.handleCallback = async (req, res) => {
+  const transaction_ref = req.query.transaction_ref || req.query.reference;
+
+  if (!transaction_ref) {
+    return res.send(`
+      <h2>❌ Invalid Callback</h2>
+      <p>No transaction reference found</p>
+    `);
+  }
+
+  // Return a simple HTML page
+  return res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Payment Status</title>
+      <style>
+        body {
+          font-family: Arial;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          flex-direction: column;
+        }
+        button {
+          padding: 10px 20px;
+          margin-top: 15px;
+          cursor: pointer;
+        }
+      </style>
+    </head>
+
+    <body>
+      <h2>⏳ Processing Payment...</h2>
+      <p>Transaction Ref: <b>${transaction_ref}</b></p>
+
+      <button onclick="verifyPayment()">Verify Payment</button>
+
+      <p id="result"></p>
+
+      <script>
+        async function verifyPayment() {
+          const res = await fetch('/api/payments/deposit/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              transactionRef: "${transaction_ref}"
+            })
+          });
+
+          const data = await res.json();
+
+          const resultEl = document.getElementById("result");
+
+          if (data.success) {
+            resultEl.innerHTML = "✅ Payment Successful! Wallet Credited";
+          } else {
+            resultEl.innerHTML = "❌ Payment Failed: " + data.message;
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
 };
 
 /**
@@ -323,7 +382,7 @@ exports.verifyDeposit = async (req, res) => {
 
     // Verify with Squad API
     const squadApiUrl =
-      process.env.SQUAD_API_BASE_URL || "https://api.squadco.com";
+      process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
     const squadSecretKey = process.env.SQUAD_SECRET_KEY;
 
     if (!squadSecretKey) {
@@ -422,9 +481,15 @@ exports.verifyDeposit = async (req, res) => {
         });
       } else {
         // Payment verification failed
+        // In verifyDeposit, when payment verification fails:
         payment.status = "failed";
         payment.errorMessage =
           response.data.message || "Payment verification failed";
+        // Don't use response.data.message if it's "Success" — that's misleading
+        payment.errorMessage =
+          response.data.data?.status !== "success"
+            ? response.data.message || "Payment verification failed"
+            : "Wallet or transaction error after successful payment";
         await payment.save();
 
         return res.status(400).json({

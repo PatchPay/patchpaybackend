@@ -1,8 +1,9 @@
-import CardDetails from '../models/carddetails'; // Assuming CardDetails model is located in '../models/carddetails'
+import CardDetails from "../models/Carddetails"; // Assuming CardDetails model is located in '../models/carddetails'
 
 // Create a new card detail entry
 exports.createCardDetail = async (req, res) => {
-  const { card_number, card_holder_name, expiry_date, cvv, billing_address } = req.body;
+  const { card_number, card_holder_name, expiry_date, cvv, billing_address } =
+    req.body;
 
   try {
     // Create a new CardDetails entry
@@ -11,14 +12,14 @@ exports.createCardDetail = async (req, res) => {
       card_holder_name,
       expiry_date,
       cvv,
-      billing_address
+      billing_address,
     });
 
     // Save the new CardDetails entry to the database
     await newCardDetail.save();
     res.status(201).json({
-      message: 'Card details created successfully',
-      newCardDetail
+      message: "Card details created successfully",
+      newCardDetail,
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -44,7 +45,7 @@ exports.getCardDetailById = async (req, res) => {
     // Find the CardDetails entry by ID
     const cardDetail = await CardDetails.findById(id);
     if (!cardDetail) {
-      return res.status(404).json({ message: 'Card details not found' });
+      return res.status(404).json({ message: "Card details not found" });
     }
     res.status(200).json(cardDetail);
   } catch (error) {
@@ -55,24 +56,29 @@ exports.getCardDetailById = async (req, res) => {
 // Update a card detail by ID
 exports.updateCardDetail = async (req, res) => {
   const { id } = req.params;
-  const { card_number, card_holder_name, expiry_date, cvv, billing_address } = req.body;
+  const { card_number, card_holder_name, expiry_date, cvv, billing_address } =
+    req.body;
 
   try {
     // Update the CardDetails entry by ID
-    const updatedCardDetail = await CardDetails.findByIdAndUpdate(id, {
-      card_number,
-      card_holder_name,
-      expiry_date,
-      cvv,
-      billing_address
-    }, { new: true });
+    const updatedCardDetail = await CardDetails.findByIdAndUpdate(
+      id,
+      {
+        card_number,
+        card_holder_name,
+        expiry_date,
+        cvv,
+        billing_address,
+      },
+      { new: true },
+    );
 
     if (!updatedCardDetail) {
-      return res.status(404).json({ message: 'Card details not found' });
+      return res.status(404).json({ message: "Card details not found" });
     }
     res.status(200).json({
-      message: 'Card details updated successfully',
-      updatedCardDetail
+      message: "Card details updated successfully",
+      updatedCardDetail,
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -87,11 +93,11 @@ exports.deleteCardDetail = async (req, res) => {
     // Delete the CardDetails entry by ID
     const deletedCardDetail = await CardDetails.findByIdAndDelete(id);
     if (!deletedCardDetail) {
-      return res.status(404).json({ message: 'Card details not found' });
+      return res.status(404).json({ message: "Card details not found" });
     }
     res.status(200).json({
-      message: 'Card details deleted successfully',
-      deletedCardDetail
+      message: "Card details deleted successfully",
+      deletedCardDetail,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
