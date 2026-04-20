@@ -154,4 +154,5 @@ module.exports = {
   getAllTransactions,
   getTransactionById,
   createTransaction,
+  getUserTransactions,
 };
