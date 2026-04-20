@@ -12,6 +12,7 @@ const rfqRoutes = require("./routes/rfqRoutes");
 const escrowRoutes = require("./routes/escrowRoutes");
 const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const transactionRoutes = require("./routes/transactionRoutes");
 
 // Import Cron Jobs
 const startQuoteNotificationCron = require("./cron/quoteNotifications");
@@ -60,6 +61,7 @@ app.use("/api/rfq", rfqRoutes);
 app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/transactions", transactionRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
