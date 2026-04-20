@@ -5,6 +5,7 @@ const {
   getAllTransactions,
   getTransactionById,
   createTransaction,
+  getUserTransactions,
 } = require("../Controllers/transactionController");
 
 // ── Routes ─────────────────────────────────────────
@@ -12,7 +13,7 @@ const {
 // GET all transactions
 router.get("/", getAllTransactions);
 
-router.get("/transactions/user/:userId", getUserTransactions);
+router.get("/user/:userId", getUserTransactions);
 
 // GET single transaction by ID
 router.get("/:id", getTransactionById);
