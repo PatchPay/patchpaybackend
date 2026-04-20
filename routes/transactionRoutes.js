@@ -5,6 +5,7 @@ const {
   getAllTransactions,
   getTransactionById,
   createTransaction,
+  getUserTransactions,
 } = require("../Controllers/transactionController");
 
 // ── Routes ─────────────────────────────────────────
