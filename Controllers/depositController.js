@@ -56,7 +56,7 @@ exports.initiateDeposit = async (req, res) => {
       });
     }
 
-    const callbackUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/payments/deposit/callback`;
+    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/payments/deposit/callback`;
 
     const payload = {
       amount: Number(amount) * 100, // Amount in kobo
