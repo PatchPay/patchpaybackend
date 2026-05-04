@@ -400,7 +400,7 @@ const cancelQuote = async (req, res) => {
     }
 
     // Check if the user is the issuer of the quote
-    if (quote.user.toString() !== userId.toString()) {
+    if (quote.user._id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
         message: "Only the quote issuer can cancel the quote",
@@ -509,7 +509,7 @@ const acceptQuote = async (req, res) => {
     console.log("Quote creator:", quote.user._id.toString());
 
     // Check if the user is the recipient of the quote
-    if (quote.destinatary_user.toString() !== userId.toString()) {
+    if (quote.destinatary_user._id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
         message: "Only the quote recipient can accept the quote",
@@ -616,7 +616,7 @@ const rejectQuote = async (req, res) => {
     }
 
     // Check if the user is the recipient of the quote
-    if (quote.destinatary_user.toString() !== userId.toString()) {
+    if (quote.destinatary_user._id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
         message: "Only the quote recipient can reject the quote",
