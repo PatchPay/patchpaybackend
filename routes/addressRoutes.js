@@ -1,4 +1,4 @@
-import Addresses from '../models/Addresses'; // Assuming Addresses model is stored in '../models/Addresses'
+import Addresses from "../models/Addresses"; // Assuming Addresses model is stored in '../models/Addresses'
 
 // Create a new address
 exports.createAddress = async (req, res) => {
@@ -8,14 +8,14 @@ exports.createAddress = async (req, res) => {
     // Create a new address entry
     const newAddress = new Addresses({
       user,
-      addresses
+      addresses,
     });
 
     // Save the new address entry to the database
     await newAddress.save();
     res.status(201).json({
-      message: 'Address added successfully',
-      newAddress
+      message: "Address added successfully",
+      newAddress,
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -26,7 +26,7 @@ exports.createAddress = async (req, res) => {
 exports.getAllAddresses = async (req, res) => {
   try {
     // Retrieve all address entries and populate the user field
-    const addresses = await Addresses.find().populate('user');
+    const addresses = await Addresses.find().populate("user");
     res.status(200).json(addresses);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -39,9 +39,11 @@ exports.getAddressesByUserId = async (req, res) => {
 
   try {
     // Find addresses for the specified user
-    const addresses = await Addresses.find({ user: userId }).populate('user');
+    const addresses = await Addresses.find({ user: userId }).populate("user");
     if (!addresses || addresses.length === 0) {
-      return res.status(404).json({ message: 'No addresses found for this user' });
+      return res
+        .status(404)
+        .json({ message: "No addresses found for this user" });
     }
     res.status(200).json(addresses);
   } catch (error) {
@@ -56,13 +58,17 @@ exports.updateAddress = async (req, res) => {
 
   try {
     // Update the specified address entry
-    const updatedAddress = await Addresses.findByIdAndUpdate(addressId, { addresses }, { new: true });
+    const updatedAddress = await Addresses.findByIdAndUpdate(
+      addressId,
+      { addresses },
+      { new: true },
+    );
     if (!updatedAddress) {
-      return res.status(404).json({ message: 'Address not found' });
+      return res.status(404).json({ message: "Address not found" });
     }
     res.status(200).json({
-      message: 'Address updated successfully',
-      updatedAddress
+      message: "Address updated successfully",
+      updatedAddress,
     });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -77,11 +83,11 @@ exports.deleteAddress = async (req, res) => {
     // Delete the specified address entry
     const deletedAddress = await Addresses.findByIdAndDelete(addressId);
     if (!deletedAddress) {
-      return res.status(404).json({ message: 'Address not found' });
+      return res.status(404).json({ message: "Address not found" });
     }
     res.status(200).json({
-      message: 'Address deleted successfully',
-      deletedAddress
+      message: "Address deleted successfully",
+      deletedAddress,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
