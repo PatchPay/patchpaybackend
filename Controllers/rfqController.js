@@ -1,20 +1,24 @@
-const User = require('../models/User');
-const Quote = require('../models/Quote');
-const Invitation = require('../models/Invitation');
-const QuoteHistory = require('../models/QuoteHistory');
-const { calculateTransactionFee, isInternationalTransaction, isCrossContinentalTransaction } = require('../utils/transactionFeeUtils');
-const crypto = require('crypto');
-const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
-const Notification = require('../models/Notification');
+const User = require("../models/User");
+const Quote = require("../models/Quote");
+const Invitation = require("../models/Invitation");
+const QuoteHistory = require("../models/QuoteHistory");
+const {
+  calculateTransactionFee,
+  isInternationalTransaction,
+  isCrossContinentalTransaction,
+} = require("../utils/transactionFeeUtils");
+const crypto = require("crypto");
+const mongoose = require("mongoose");
+const nodemailer = require("nodemailer");
+const Notification = require("../models/Notification");
 
 // Set up nodemailer transporter
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
+    pass: process.env.EMAIL_PASSWORD,
+  },
 });
 
 // Send email function
@@ -29,14 +33,14 @@ const sendEmail = async (to, subject, text) => {
           <h2 style="color: #4a4a4a;">PatchPay Notification</h2>
           <p>${text}</p>
         </div>
-      `
+      `,
     };
-    
+
     const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent:', info.response);
+    console.log("Email sent:", info.response);
     return info;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error("Error sending email:", error);
     throw error;
   }
 };
@@ -49,7 +53,7 @@ const searchUser = async (req, res) => {
     if (!query || !searchType) {
       return res.status(400).json({
         success: false,
-        message: 'Query and searchType are required'
+        message: "Query and searchType are required",
       });
     }
 
@@ -68,55 +72,54 @@ const searchUser = async (req, res) => {
       status_client: 1,
       uniqueId: 1,
       address: 1,
-      state: 1
+      state: 1,
     };
 
     switch (searchType) {
-      case 'email':
+      case "email":
         user = await User.findOne({ email: query }).select(requiredFields);
         break;
-      case 'phone':
-        user = await User.findOne({ phoneNumber: query }).select(requiredFields);
+      case "phone":
+        user = await User.findOne({ phoneNumber: query }).select(
+          requiredFields,
+        );
         break;
-      case 'id':
+      case "id":
         user = await User.findOne({ uniqueId: query }).select(requiredFields);
         break;
-      case 'name':
-        user = await User.findOne({ 
-          $or: [
-            { firstName: query },
-            { lastName: query }
-          ]
+      case "name":
+        user = await User.findOne({
+          $or: [{ firstName: query }, { lastName: query }],
         }).select(requiredFields);
         break;
       default:
         return res.status(400).json({
           success: false,
-          message: 'Invalid search type'
+          message: "Invalid search type",
         });
     }
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: "User not found",
       });
     }
 
     // Ensure the user has all required fields for exchange rate calculation
-    if (!user.currency) user.currency = 'GBP';
-    if (!user.countryCode) user.countryCode = 'GB';
-    if (!user.continent) user.continent = 'Europe';
+    if (!user.currency) user.currency = "GBP";
+    if (!user.countryCode) user.countryCode = "GB";
+    if (!user.continent) user.continent = "Europe";
 
     res.json({
       success: true,
-      data: user
+      data: user,
     });
   } catch (error) {
-    console.error('Error in searchUser:', error);
+    console.error("Error in searchUser:", error);
     res.status(500).json({
       success: false,
-      message: 'Error searching user'
+      message: "Error searching user",
     });
   }
 };
@@ -124,11 +127,11 @@ const searchUser = async (req, res) => {
 // Create a new RFQ
 const createRFQ = async (req, res) => {
   try {
-    console.log('Received RFQ data:', req.body);
-    const { 
-      recipientId, 
-      product_description, 
-      product_quantity, 
+    console.log("Received RFQ data:", req.body);
+    const {
+      recipientId,
+      product_description,
+      product_quantity,
       amount,
       delivery_code,
       delivery_type,
@@ -138,7 +141,7 @@ const createRFQ = async (req, res) => {
       delivery_charge,
       transaction_charges,
       subtotal,
-      total_amount
+      total_amount,
     } = req.body;
 
     // Find recipient
@@ -146,7 +149,7 @@ const createRFQ = async (req, res) => {
     if (!recipient) {
       return res.status(404).json({
         success: false,
-        message: 'Recipient not found'
+        message: "Recipient not found",
       });
     }
 
@@ -155,29 +158,35 @@ const createRFQ = async (req, res) => {
     if (!sender) {
       return res.status(404).json({
         success: false,
-        message: 'Sender not found'
+        message: "Sender not found",
       });
     }
 
     // Generate unique quote number
-    const quoteNumber = crypto.randomBytes(4).toString('hex').toUpperCase();
-    
+    const quoteNumber = crypto.randomBytes(4).toString("hex").toUpperCase();
+
     // Generate UPRN (Unique Property Reference Number)
-    const uprn = crypto.randomBytes(6).toString('hex').toUpperCase();
+    const uprn = crypto.randomBytes(6).toString("hex").toUpperCase();
 
     // Get currencies
-    const senderCurrency = sender.currency || 'GBP';
-    const recipientCurrency = recipient.currency || 'GBP';
+    const senderCurrency = sender.currency || "GBP";
+    const recipientCurrency = recipient.currency || "GBP";
 
     // Calculate exchange rate and total using the same logic as transfers
-    const feeDetails = calculateTransactionFee(sender, recipient, Number(amount));
-    
+    const feeDetails = calculateTransactionFee(
+      sender,
+      recipient,
+      Number(amount),
+    );
+
     // Calculate total based on exchange rate
     let exchangeRate = 1;
 
     // If currencies are different, apply the exchange rate
     if (isInternationalTransaction(sender.countryCode, recipient.countryCode)) {
-      if (isCrossContinentalTransaction(sender.countryCode, recipient.countryCode)) {
+      if (
+        isCrossContinentalTransaction(sender.countryCode, recipient.countryCode)
+      ) {
         // Cross-continental rate
         exchangeRate = feeDetails.feePercentage / 100 + 1;
       } else {
@@ -189,17 +198,18 @@ const createRFQ = async (req, res) => {
     // Create RFQ with all required fields
     const rfq = new Quote({
       quote_number: quoteNumber,
-      type: 'RFQ',
+      type: "RFQ",
       product_description,
       product_quantity,
       amount: Number(amount),
       currency: senderCurrency,
       total: total_amount,
       uprn,
-      status: 'Pending',
+      status: "Pending",
       user: req.user._id,
       destinatary_user: recipientId,
-      delivery_code: delivery_code || Math.floor(100000 + Math.random() * 900000),
+      delivery_code:
+        delivery_code || Math.floor(100000 + Math.random() * 900000),
       delivery_type,
       trade_type,
       delivery_address,
@@ -211,7 +221,7 @@ const createRFQ = async (req, res) => {
       coupon: [],
       exchange_rate: exchangeRate,
       responseNotificationDue: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72 hours from now
-      notificationSent: false
+      notificationSent: false,
     });
 
     await rfq.save();
@@ -220,10 +230,10 @@ const createRFQ = async (req, res) => {
     const quoteHistory = new QuoteHistory({
       quote: rfq._id,
       user: recipientId,
-      status: 'Pending',
-      action: 'Created',
+      status: "Pending",
+      action: "Created",
       notificationDue: new Date(Date.now() + 72 * 60 * 60 * 1000), // 72 hours for response
-      notificationSent: false
+      notificationSent: false,
     });
 
     await quoteHistory.save();
@@ -241,8 +251,8 @@ const createRFQ = async (req, res) => {
         quoteNumber,
         amount: Number(amount),
         currency: senderCurrency,
-        recipientName: `${recipient.firstName} ${recipient.lastName}`
-      }
+        recipientName: `${recipient.firstName} ${recipient.lastName}`,
+      },
     });
     await senderNotification.save();
 
@@ -259,20 +269,20 @@ const createRFQ = async (req, res) => {
         quoteNumber,
         amount: Number(amount),
         currency: senderCurrency,
-        senderName: `${sender.firstName} ${sender.lastName}`
-      }
+        senderName: `${sender.firstName} ${sender.lastName}`,
+      },
     });
     await recipientNotification.save();
 
     res.status(201).json({
       success: true,
-      data: rfq
+      data: rfq,
     });
   } catch (error) {
-    console.error('Error in createRFQ:', error);
+    console.error("Error in createRFQ:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Error creating RFQ'
+      message: error.message || "Error creating RFQ",
     });
   }
 };
@@ -280,17 +290,17 @@ const createRFQ = async (req, res) => {
 // Send invitation to non-registered user
 const sendInvitation = async (req, res) => {
   try {
-    const { contact, type = 'email' } = req.body;
+    const { contact, type = "email" } = req.body;
 
     if (!contact) {
       return res.status(400).json({
         success: false,
-        message: 'Contact information is required'
+        message: "Contact information is required",
       });
     }
 
     // Generate invitation token
-    const token = crypto.randomBytes(32).toString('hex');
+    const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 14); // 14 days expiration
 
@@ -300,38 +310,42 @@ const sendInvitation = async (req, res) => {
       type,
       token,
       expiresAt,
-      status: 'pending'
+      status: "pending",
     });
 
     await invitation.save();
 
     // Send invitation via email
-    if (type === 'email') {
+    if (type === "email") {
       try {
-        await sendEmail(contact, 'Join PatchPay', `Click here to join: ${process.env.FRONTEND_URL}/register?token=${token}`);
+        await sendEmail(
+          contact,
+          "Join PatchPay",
+          `Click here to join: ${process.env.FRONTEND_URL}/register?token=${token}`,
+        );
       } catch (emailError) {
-        console.error('Error sending invitation email:', emailError);
+        console.error("Error sending invitation email:", emailError);
         return res.status(500).json({
           success: false,
-          message: 'Error sending invitation email'
+          message: "Error sending invitation email",
         });
       }
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Only email invitations are supported'
+        message: "Only email invitations are supported",
       });
     }
 
     res.json({
       success: true,
-      message: 'Invitation sent successfully'
+      message: "Invitation sent successfully",
     });
   } catch (error) {
-    console.error('Error in sendInvitation:', error);
+    console.error("Error in sendInvitation:", error);
     res.status(500).json({
       success: false,
-      message: 'Error sending invitation'
+      message: "Error sending invitation",
     });
   }
 };
@@ -342,24 +356,27 @@ const getQuotes = async (req, res) => {
 
     // Find all quotes where the user is either the creator or recipient
     const quotes = await Quote.find({
-      $or: [
-        { user: userId },
-        { destinatary_user: userId }
-      ]
+      $or: [{ user: userId }, { destinatary_user: userId }],
     })
-    .populate('user', 'firstName lastName organization email phoneNumber uniqueId address')
-    .populate('destinatary_user', 'firstName lastName organization email phoneNumber uniqueId address')
-    .sort({ createdAt: -1 });
+      .populate(
+        "user",
+        "firstName lastName organization email phoneNumber uniqueId address",
+      )
+      .populate(
+        "destinatary_user",
+        "firstName lastName organization email phoneNumber uniqueId address",
+      )
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
-      data: quotes
+      data: quotes,
     });
   } catch (error) {
-    console.error('Error fetching quotes:', error);
+    console.error("Error fetching quotes:", error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch quotes'
+      message: "Failed to fetch quotes",
     });
   }
 };
@@ -372,13 +389,13 @@ const cancelQuote = async (req, res) => {
 
     // Find the quote and populate user details
     const quote = await Quote.findById(quoteId)
-      .populate('user', 'firstName lastName email')
-      .populate('destinatary_user', 'firstName lastName email');
+      .populate("user", "firstName lastName email")
+      .populate("destinatary_user", "firstName lastName email");
 
     if (!quote) {
       return res.status(404).json({
         success: false,
-        message: 'Quote not found'
+        message: "Quote not found",
       });
     }
 
@@ -386,28 +403,28 @@ const cancelQuote = async (req, res) => {
     if (quote.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
-        message: 'Only the quote issuer can cancel the quote'
+        message: "Only the quote issuer can cancel the quote",
       });
     }
 
     // Check if the quote is in a cancellable state
-    if (quote.status !== 'Pending') {
+    if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
-        message: 'Only pending quotes can be cancelled'
+        message: "Only pending quotes can be cancelled",
       });
     }
 
     // Update the quote status to cancelled
-    quote.status = 'Cancelled';
+    quote.status = "Cancelled";
     await quote.save();
 
     // Create quote history entry
     const quoteHistory = new QuoteHistory({
       quote: quote._id,
       user: userId,
-      status: 'Cancelled',
-      action: 'Cancelled by issuer'
+      status: "Cancelled",
+      action: "Cancelled by issuer",
     });
     await quoteHistory.save();
 
@@ -421,8 +438,8 @@ const cancelQuote = async (req, res) => {
       category: "system",
       metadata: {
         quoteId: quote._id,
-        quoteNumber: quote.quote_number
-      }
+        quoteNumber: quote.quote_number,
+      },
     });
     await issuerNotification.save();
 
@@ -437,8 +454,8 @@ const cancelQuote = async (req, res) => {
       metadata: {
         quoteId: quote._id,
         quoteNumber: quote.quote_number,
-        senderName: `${quote.user.firstName} ${quote.user.lastName}`
-      }
+        senderName: `${quote.user.firstName} ${quote.user.lastName}`,
+      },
     });
     await recipientNotification.save();
 
@@ -446,24 +463,24 @@ const cancelQuote = async (req, res) => {
     try {
       await sendEmail(
         quote.destinatary_user.email,
-        'Quote Cancelled',
-        `Quote #${quote.quote_number} has been cancelled by the issuer.`
+        "Quote Cancelled",
+        `Quote #${quote.quote_number} has been cancelled by the issuer.`,
       );
     } catch (emailError) {
-      console.error('Error sending cancellation email:', emailError);
+      console.error("Error sending cancellation email:", emailError);
       // Don't fail the request if email fails
     }
 
     res.status(200).json({
       success: true,
-      message: 'Quote cancelled successfully',
-      data: quote
+      message: "Quote cancelled successfully",
+      data: quote,
     });
   } catch (error) {
-    console.error('Error in cancelQuote:', error);
+    console.error("Error in cancelQuote:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Error cancelling quote'
+      message: error.message || "Error cancelling quote",
     });
   }
 };
@@ -476,43 +493,48 @@ const acceptQuote = async (req, res) => {
 
     // Find the quote and populate user details
     const quote = await Quote.findById(quoteId)
-      .populate('user', 'firstName lastName email')
-      .populate('destinatary_user', 'firstName lastName email');
+      .populate("user", "firstName lastName email")
+      .populate("destinatary_user", "firstName lastName email");
 
     if (!quote) {
       return res.status(404).json({
         success: false,
-        message: 'Quote not found'
+        message: "Quote not found",
       });
     }
+
+    // ✅ ADD LOGS HERE
+    console.log("Logged in user:", userId.toString());
+    console.log("Quote recipient:", quote.destinatary_user._id.toString());
+    console.log("Quote creator:", quote.user._id.toString());
 
     // Check if the user is the recipient of the quote
     if (quote.destinatary_user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
-        message: 'Only the quote recipient can accept the quote'
+        message: "Only the quote recipient can accept the quote",
       });
     }
 
     // Check if the quote is in an acceptable state
-    if (quote.status !== 'Pending') {
+    if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
-        message: 'Only pending quotes can be accepted'
+        message: "Only pending quotes can be accepted",
       });
     }
 
     // Update the quote status to accepted
-    quote.status = 'Accepted';
+    quote.status = "Accepted";
     await quote.save();
 
     // Create quote history entry
     const quoteHistory = new QuoteHistory({
       quote: quote._id,
       user: userId,
-      status: 'Accepted',
-      action: 'Accepted by recipient',
-      deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+      status: "Accepted",
+      action: "Accepted by recipient",
+      deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
     });
     await quoteHistory.save();
 
@@ -527,8 +549,8 @@ const acceptQuote = async (req, res) => {
       metadata: {
         quoteId: quote._id,
         quoteNumber: quote.quote_number,
-        recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`
-      }
+        recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`,
+      },
     });
     await issuerNotification.save();
 
@@ -542,8 +564,8 @@ const acceptQuote = async (req, res) => {
       category: "system",
       metadata: {
         quoteId: quote._id,
-        quoteNumber: quote.quote_number
-      }
+        quoteNumber: quote.quote_number,
+      },
     });
     await recipientNotification.save();
 
@@ -552,24 +574,24 @@ const acceptQuote = async (req, res) => {
       const issuer = await User.findById(quote.user);
       await sendEmail(
         issuer.email,
-        'Quote Accepted',
-        `Quote #${quote.quote_number} has been accepted by the recipient.`
+        "Quote Accepted",
+        `Quote #${quote.quote_number} has been accepted by the recipient.`,
       );
     } catch (emailError) {
-      console.error('Error sending acceptance email:', emailError);
+      console.error("Error sending acceptance email:", emailError);
       // Don't fail the request if email fails
     }
 
     res.status(200).json({
       success: true,
-      message: 'Quote accepted successfully',
-      data: quote
+      message: "Quote accepted successfully",
+      data: quote,
     });
   } catch (error) {
-    console.error('Error in acceptQuote:', error);
+    console.error("Error in acceptQuote:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Error accepting quote'
+      message: error.message || "Error accepting quote",
     });
   }
 };
@@ -583,13 +605,13 @@ const rejectQuote = async (req, res) => {
 
     // Find the quote and populate user details
     const quote = await Quote.findById(quoteId)
-      .populate('user', 'firstName lastName email')
-      .populate('destinatary_user', 'firstName lastName email');
+      .populate("user", "firstName lastName email")
+      .populate("destinatary_user", "firstName lastName email");
 
     if (!quote) {
       return res.status(404).json({
         success: false,
-        message: 'Quote not found'
+        message: "Quote not found",
       });
     }
 
@@ -597,29 +619,29 @@ const rejectQuote = async (req, res) => {
     if (quote.destinatary_user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
-        message: 'Only the quote recipient can reject the quote'
+        message: "Only the quote recipient can reject the quote",
       });
     }
 
     // Check if the quote is in a rejectable state
-    if (quote.status !== 'Pending') {
+    if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
-        message: 'Only pending quotes can be rejected'
+        message: "Only pending quotes can be rejected",
       });
     }
 
     // Update the quote status to rejected
-    quote.status = 'Rejected';
+    quote.status = "Rejected";
     await quote.save();
 
     // Create quote history entry
     const quoteHistory = new QuoteHistory({
       quote: quote._id,
       user: userId,
-      status: 'Rejected',
-      action: `Rejected by recipient${reason ? ': ' + reason : ''}`,
-      deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+      status: "Rejected",
+      action: `Rejected by recipient${reason ? ": " + reason : ""}`,
+      deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
     });
     await quoteHistory.save();
 
@@ -628,15 +650,15 @@ const rejectQuote = async (req, res) => {
       recipientId: quote.user._id,
       senderId: userId,
       title: "RFQ Rejected",
-      message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}${reason ? '. Reason: ' + reason : ''}`,
+      message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}${reason ? ". Reason: " + reason : ""}`,
       type: "error",
       category: "system",
       metadata: {
         quoteId: quote._id,
         quoteNumber: quote.quote_number,
         recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`,
-        reason
-      }
+        reason,
+      },
     });
     await issuerNotification.save();
 
@@ -645,14 +667,14 @@ const rejectQuote = async (req, res) => {
       recipientId: quote.destinatary_user._id,
       senderId: userId,
       title: "RFQ Rejected",
-      message: `You have rejected RFQ #${quote.quote_number}${reason ? '. Reason: ' + reason : ''}`,
+      message: `You have rejected RFQ #${quote.quote_number}${reason ? ". Reason: " + reason : ""}`,
       type: "info",
       category: "system",
       metadata: {
         quoteId: quote._id,
         quoteNumber: quote.quote_number,
-        reason
-      }
+        reason,
+      },
     });
     await recipientNotification.save();
 
@@ -661,24 +683,24 @@ const rejectQuote = async (req, res) => {
       const issuer = await User.findById(quote.user);
       await sendEmail(
         issuer.email,
-        'Quote Rejected',
-        `Quote #${quote.quote_number} has been rejected by the recipient${reason ? '. Reason: ' + reason : '.'}`
+        "Quote Rejected",
+        `Quote #${quote.quote_number} has been rejected by the recipient${reason ? ". Reason: " + reason : "."}`,
       );
     } catch (emailError) {
-      console.error('Error sending rejection email:', emailError);
+      console.error("Error sending rejection email:", emailError);
       // Don't fail the request if email fails
     }
 
     res.status(200).json({
       success: true,
-      message: 'Quote rejected successfully',
-      data: quote
+      message: "Quote rejected successfully",
+      data: quote,
     });
   } catch (error) {
-    console.error('Error in rejectQuote:', error);
+    console.error("Error in rejectQuote:", error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Error rejecting quote'
+      message: error.message || "Error rejecting quote",
     });
   }
 };
@@ -687,13 +709,13 @@ const rejectQuote = async (req, res) => {
 const checkQuoteNotifications = async () => {
   try {
     const now = new Date();
-    
+
     // Find quotes that need response notification (72 hours)
     const pendingQuotes = await Quote.find({
-      status: 'Pending',
+      status: "Pending",
       responseNotificationDue: { $lte: now },
-      notificationSent: false
-    }).populate('user destinatary_user');
+      notificationSent: false,
+    }).populate("user destinatary_user");
 
     for (const quote of pendingQuotes) {
       try {
@@ -708,27 +730,30 @@ const checkQuoteNotifications = async () => {
           metadata: {
             quoteId: quote._id,
             quoteNumber: quote.quote_number,
-            senderName: `${quote.user.firstName} ${quote.user.lastName}`
-          }
+            senderName: `${quote.user.firstName} ${quote.user.lastName}`,
+          },
         });
         await reminderNotification.save();
-        
+
         quote.notificationSent = true;
         await quote.save();
       } catch (error) {
-        console.error(`Error sending notification for quote ${quote.quote_number}:`, error);
+        console.error(
+          `Error sending notification for quote ${quote.quote_number}:`,
+          error,
+        );
       }
     }
 
     // Find quotes that are about to be deleted (13 days after response)
     const quotesToDelete = await Quote.find({
-      status: { $in: ['Accepted', 'Rejected'] },
+      status: { $in: ["Accepted", "Rejected"] },
       updatedAt: {
         $lte: new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000),
-        $gt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+        $gt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
       },
-      deletionNotificationSent: { $ne: true }
-    }).populate('user destinatary_user');
+      deletionNotificationSent: { $ne: true },
+    }).populate("user destinatary_user");
 
     for (const quote of quotesToDelete) {
       try {
@@ -742,8 +767,8 @@ const checkQuoteNotifications = async () => {
           category: "system",
           metadata: {
             quoteId: quote._id,
-            quoteNumber: quote.quote_number
-          }
+            quoteNumber: quote.quote_number,
+          },
         });
         await issuerDeletionNotification.save();
 
@@ -757,37 +782,40 @@ const checkQuoteNotifications = async () => {
           category: "system",
           metadata: {
             quoteId: quote._id,
-            quoteNumber: quote.quote_number
-          }
+            quoteNumber: quote.quote_number,
+          },
         });
         await recipientDeletionNotification.save();
 
         quote.deletionNotificationSent = true;
         await quote.save();
       } catch (error) {
-        console.error(`Error sending deletion notification for quote ${quote.quote_number}:`, error);
+        console.error(
+          `Error sending deletion notification for quote ${quote.quote_number}:`,
+          error,
+        );
       }
     }
 
     // Delete quotes that are 14 days old after response
     const deleteQuotes = await Quote.find({
-      status: { $in: ['Accepted', 'Rejected'] },
-      updatedAt: { $lte: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) }
+      status: { $in: ["Accepted", "Rejected"] },
+      updatedAt: { $lte: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) },
     });
 
     for (const quote of deleteQuotes) {
       await Quote.findByIdAndDelete(quote._id);
       await QuoteHistory.findOneAndUpdate(
         { quote: quote._id },
-        { 
-          status: 'Deleted',
-          action: 'Automatic Deletion',
-          deletedAt: now
-        }
+        {
+          status: "Deleted",
+          action: "Automatic Deletion",
+          deletedAt: now,
+        },
       );
     }
   } catch (error) {
-    console.error('Error in checkQuoteNotifications:', error);
+    console.error("Error in checkQuoteNotifications:", error);
   }
 };
 
@@ -799,34 +827,42 @@ const getQuoteById = async (req, res) => {
 
     // Find the quote and populate user details
     const quote = await Quote.findById(quoteId)
-      .populate('user', 'firstName lastName organization email phoneNumber uniqueId address')
-      .populate('destinatary_user', 'firstName lastName organization email phoneNumber uniqueId address');
+      .populate(
+        "user",
+        "firstName lastName organization email phoneNumber uniqueId address",
+      )
+      .populate(
+        "destinatary_user",
+        "firstName lastName organization email phoneNumber uniqueId address",
+      );
 
     if (!quote) {
       return res.status(404).json({
         success: false,
-        message: 'Quote not found'
+        message: "Quote not found",
       });
     }
 
     // Check if the user has permission to view this quote
-    if (quote.user._id.toString() !== userId.toString() && 
-        quote.destinatary_user._id.toString() !== userId.toString()) {
+    if (
+      quote.user._id.toString() !== userId.toString() &&
+      quote.destinatary_user._id.toString() !== userId.toString()
+    ) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to view this quote'
+        message: "You do not have permission to view this quote",
       });
     }
 
     res.json({
       success: true,
-      data: quote
+      data: quote,
     });
   } catch (error) {
-    console.error('Error fetching quote:', error);
+    console.error("Error fetching quote:", error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch quote'
+      message: "Failed to fetch quote",
     });
   }
 };
@@ -840,5 +876,5 @@ module.exports = {
   acceptQuote,
   rejectQuote,
   checkQuoteNotifications,
-  getQuoteById
-}; 
+  getQuoteById,
+};
