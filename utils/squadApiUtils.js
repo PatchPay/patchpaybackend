@@ -1,218 +1,157 @@
 const axios = require("axios");
 
-// Squad API configuration
-const SQUAD_API_URL =
-  process.env.SQUAD_API_BASE_URL || "https://api-d.squadco.com/v1"; // Use sandbox URL for dev
-const SQUAD_SECRET_KEY = process.env.SQUAD_SECRET_KEY;
-const SQUAD_PUBLIC_KEY = process.env.SQUAD_PUBLIC_KEY;
+const BASE_URL =
+  process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
 
-// Create axios instance for Squad API calls
+const SQUAD_SECRET_KEY = process.env.SQUAD_SECRET_KEY;
+
+// AXIOS INSTANCE
 const squadApi = axios.create({
-  baseURL: SQUAD_API_URL,
+  baseURL: BASE_URL,
   headers: {
     "Content-Type": "application/json",
     Authorization: `Bearer ${SQUAD_SECRET_KEY}`,
   },
-  timeout: 30000, // 30 seconds timeout
+  timeout: 30000,
 });
 
 /**
- * Initiates a payment transaction using Squad Direct API
- * @param {Object} paymentData - Payment details
- * @returns {Promise<Object>} - Response from Squad API
+ * INITIATE PAYMENT
  */
 exports.initiatePayment = async (paymentData) => {
   try {
-    console.log("Initiating payment with Squad:", paymentData);
-
     const payload = {
-      amount: paymentData.amount * 100, // Convert to kobo (smallest unit)
+      amount: paymentData.amount * 100,
       email: paymentData.email,
       currency: paymentData.currency || "NGN",
       transaction_ref: paymentData.transactionRef,
       callback_url:
         paymentData.callbackUrl ||
-        `${process.env.BACKEND_URL}/api/payments/deposit/callback`,
+        `${process.env.BACKEND_URL}/api/payments/deposit/webhook`,
       customer: {
         name: paymentData.customerName,
         email: paymentData.email,
         phone: paymentData.phone || "",
       },
-      meta_data: {
-        user_id: paymentData.userId,
-        uprn: paymentData.uprn || "",
-        purpose: "Account funding",
-      },
     };
 
-    const response = await squadApi.post("/transaction/initiate", payload);
-    console.log("Payment initiated successfully:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Payment initiation failed:", error);
-
-    // Detailed error logging
-    if (error.response) {
-      console.error(
-        `Squad API error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
-
-    throw error;
+    const res = await squadApi.post("/transaction/initiate", payload);
+    return res.data;
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    throw err;
   }
 };
 
 /**
- * Verifies a transaction using Squad verification endpoint
- * @param {string} transactionRef - Reference of the transaction to verify
- * @returns {Promise<Object>} - Response from Squad API with transaction status
+ * LOOKUP ACCOUNT (FIXED)
  */
-exports.verifyTransaction = async (transactionRef) => {
+exports.lookupAccount = async ({ bankCode, accountNumber }) => {
   try {
-    console.log("Verifying transaction:", transactionRef);
+    const payload = {
+      bank_code: bankCode,
+      account_number: accountNumber,
+    };
 
-    const response = await squadApi.get(
-      `/transaction/verify/${transactionRef}`,
-    );
-    console.log("Transaction verification result:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Transaction verification failed:", error);
+    const res = await squadApi.post("/payout/account/lookup", payload);
 
-    if (error.response) {
-      console.error(
-        `Squad verification error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
-
-    throw error;
+    return res.data;
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    throw err;
   }
 };
 
 /**
- * Initiates a bank transfer/withdrawal
- * @param {Object} withdrawalData - Withdrawal details
- * @returns {Promise<Object>} - Response from Squad API
+ * INITIATE WITHDRAWAL (🔥 FIXED)
  */
 exports.initiateWithdrawal = async (withdrawalData) => {
   try {
-    console.log("Initiating withdrawal with Squad:", withdrawalData);
-
+    // ✅ MAP EVERYTHING TO SQUAD FORMAT HERE (IMPORTANT)
     const payload = {
-      amount: withdrawalData.amount * 100, // Convert to kobo (smallest unit)
+      amount: String(withdrawalData.amount),
+
       bank_code: withdrawalData.bankCode,
+
       account_number: withdrawalData.accountNumber,
+
       account_name: withdrawalData.accountName,
+
       currency_id: "NGN",
-      // currency: "NGN",
+
       transaction_reference: withdrawalData.transactionRef,
-      // narration: withdrawalData.description || "Wallet withdrawal",
-      // meta_data: {
-      //   user_id: withdrawalData.userId,
-      //   uprn: withdrawalData.uprn || "",
-      //   purpose: "Wallet withdrawal",
-      // },
+
+      remark: withdrawalData.description || "Wallet withdrawal",
     };
 
+    console.log("🔥 FINAL SQUAD PAYLOAD:", payload);
+
     const response = await squadApi.post("/payout/transfer", payload);
-    console.log("Withdrawal initiated successfully:", response.data);
+
+    console.log("✅ SQUAD RESPONSE:", response.data);
+
     return response.data;
   } catch (error) {
-    console.error("Withdrawal initiation failed:", error);
-
-    if (error.response) {
-      console.error(
-        `Squad API withdrawal error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
+    console.log("❌ SQUAD ERROR:", error.response?.data);
 
     throw error;
   }
 };
 
 /**
- * Gets the status of a transfer/withdrawal transaction
- * @param {string} transactionRef - Reference of the transaction to check
- * @returns {Promise<Object>} - Response from Squad API with withdrawal status
+ * REQUERY TRANSFER
  */
-exports.getWithdrawalStatus = async (transactionRef) => {
+exports.requeryTransfer = async (ref) => {
   try {
-    console.log("Checking withdrawal status:", transactionRef);
+    const res = await squadApi.post("/payout/requery", {
+      transaction_reference: ref,
+    });
 
-    const response = await squadApi.get(
-      `/transfer/get-transfer?transaction_ref=${transactionRef}`,
-    );
-    console.log("Withdrawal status result:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Withdrawal status check failed:", error);
-
-    if (error.response) {
-      console.error(
-        `Squad API status check error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
-
-    throw error;
+    return res.data;
+  } catch (err) {
+    throw err;
   }
 };
 
 /**
- * Gets a list of supported banks for transfers
- * @returns {Promise<Object>} - Response from Squad API with list of banks
+ * GET BANK LIST (FIXED)
  */
 exports.getBanks = async () => {
   try {
-    console.log("Getting list of banks from Squad API");
-
-    const response = await squadApi.get("/transfer/bank-codes");
-    console.log("Banks list retrieved successfully");
-    return response.data;
-  } catch (error) {
-    console.error("Failed to retrieve banks list:", error);
-
-    if (error.response) {
-      console.error(
-        `Squad API banks list error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
-
-    throw error;
+    const res = await squadApi.get("/api/banks");
+    return res.data;
+  } catch (err) {
+    throw err;
   }
 };
 
 /**
- * Resolves a bank account to get account name
- * @param {string} accountNumber - Account number to resolve
- * @param {string} bankCode - Bank code for the account
- * @returns {Promise<Object>} - Response from Squad API with account details
+ * RESOLVE ACCOUNT (FIXED)
  */
 exports.resolveBankAccount = async (accountNumber, bankCode) => {
   try {
-    console.log(
-      `Resolving bank account: ${accountNumber}, bank code: ${bankCode}`,
+    const res = await squadApi.post("/payout/account/lookup", {
+      account_number: accountNumber,
+      bank_code: bankCode,
+    });
+
+    return res.data;
+  } catch (err) {
+    throw err;
+  }
+};
+
+/**
+ * VERIFY STATUS
+ */
+exports.getWithdrawalStatus = async (ref) => {
+  try {
+    const res = await squadApi.get(
+      `/payout/transfer?transaction_reference=${ref}`,
     );
 
-    const response = await squadApi.get(
-      `/transfer/account-lookup?account_no=${accountNumber}&bank_code=${bankCode}`,
-    );
-    console.log("Bank account resolved successfully:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Bank account resolution failed:", error);
-
-    if (error.response) {
-      console.error(
-        `Squad API account resolution error - Status: ${error.response.status}`,
-        error.response.data,
-      );
-    }
-
-    throw error;
+    return res.data;
+  } catch (err) {
+    throw err;
   }
 };
