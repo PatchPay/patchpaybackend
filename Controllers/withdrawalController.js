@@ -3,30 +3,43 @@ const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const User = require("../models/User");
 const mongoose = require("mongoose");
-const {
-  generateUPRN,
-  generateStaticUserUPRN,
-} = require("../utils/paymentUtils");
+const { generateUPRN } = require("../utils/paymentUtils");
 const squadApi = require("../utils/squadApiUtils");
 
 /**
  * Initiate a withdrawal request
  * @route POST /api/payments/withdrawal/initiate
  */
+// controllers/withdrawalController.js
+
+/**
+ * INITIATE WITHDRAWAL
+ * @route POST /api/payments/withdrawal/initiate
+ */
 exports.initiateWithdrawal = async (req, res) => {
   const session = await mongoose.startSession();
+
   session.startTransaction();
 
   try {
-    // Get user from middleware
+    /**
+     * USER
+     */
     const user = req.user;
 
-    // Get withdrawal details from request body
+    /**
+     * REQUEST BODY
+     */
     const { amount, bankCode, accountNumber, accountName, description } =
       req.body;
 
-    // Validate required fields
-    if (!amount || isNaN(amount) || amount <= 0) {
+    /**
+     * VALIDATIONS
+     */
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+
       return res.status(400).json({
         success: false,
         message: "Please provide a valid amount",
@@ -34,188 +47,354 @@ exports.initiateWithdrawal = async (req, res) => {
     }
 
     if (!bankCode || !accountNumber || !accountName) {
+      await session.abortTransaction();
+      session.endSession();
+
       return res.status(400).json({
         success: false,
         message: "Bank details are required",
       });
     }
 
-    // Find user's wallet
-    const wallet = await Wallet.findOne({ userId: user._id }).session(session);
+    /**
+     * VERIFY ACCOUNT USING SQUAD
+     */
+    const accountLookup = await squadApi.lookupAccount({
+      bankCode,
+      accountNumber,
+    });
+
+    if (!accountLookup || !accountLookup.success || !accountLookup.data) {
+      await session.abortTransaction();
+      session.endSession();
+
+      return res.status(400).json({
+        success: false,
+        message: "Unable to verify bank account",
+      });
+    }
+
+    /**
+     * ACCOUNT NAME MATCH CHECK
+     */
+    const resolvedAccountName = accountLookup.data.account_name;
+
+    if (
+      resolvedAccountName.toLowerCase().trim() !==
+      accountName.toLowerCase().trim()
+    ) {
+      await session.abortTransaction();
+      session.endSession();
+
+      return res.status(400).json({
+        success: false,
+        message: "Account name mismatch",
+        data: {
+          squadAccountName: resolvedAccountName,
+        },
+      });
+    }
+
+    /**
+     * FIND WALLET
+     */
+    const wallet = await Wallet.findOne({
+      userId: user._id,
+    }).session(session);
 
     if (!wallet) {
       await session.abortTransaction();
       session.endSession();
+
       return res.status(404).json({
         success: false,
         message: "Wallet not found",
       });
     }
 
+    /**
+     * ONLY NGN
+     */
     if (wallet.currency !== "NGN") {
       await session.abortTransaction();
       session.endSession();
+
       return res.status(400).json({
         success: false,
         message: "Withdrawals are only supported in NGN",
       });
     }
 
-    // Check if wallet has sufficient balance
-    if (wallet.balance < amount) {
+    /**
+     * CHECK BALANCE
+     */
+    if (Number(wallet.balance) < Number(amount)) {
       await session.abortTransaction();
       session.endSession();
+
       return res.status(400).json({
         success: false,
         message: "Insufficient balance",
       });
     }
 
-    // Generate UPRN for this withdrawal
+    /**
+     * GENERATE REFERENCES
+     */
     const withdrawalUprn = generateUPRN(user._id, "withdrawal");
 
-    // Generate transaction reference
-    const transactionRef = `WDR-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const merchantId = process.env.SQUAD_MERCHANT_ID.trim();
 
-    // Create withdrawal payment record
+    const transactionRef = `${merchantId}_${Date.now()}`;
+
+    /**
+     * CREATE WITHDRAWAL RECORD
+     */
     const withdrawalPayment = new WithdrawalPayment({
       userId: user._id,
+
       amount,
-      currency: wallet.currency,
+
+      currency: "NGN",
+
       transactionRef,
+
       bankCode,
+
       accountNumber,
+
       accountName,
+
       status: "pending",
     });
 
-    await withdrawalPayment.save({ session });
+    await withdrawalPayment.save({
+      session,
+    });
 
-    // Create transaction record
+    /**
+     * CREATE TRANSACTION RECORD
+     */
     const transaction = new Transaction({
       senderId: user._id,
+
       senderWallet: wallet._id,
+
       total: amount,
+
       amount,
-      currency: wallet.currency,
+
+      currency: "NGN",
+
       type: "withdrawal",
+
       status: "pending",
+
       reference: withdrawalUprn,
-      isUserAccountTransfer: true, // This is a transfer from a user account
+
+      isUserAccountTransfer: true,
+
       description: description || "Withdrawal from wallet",
+
       paymentMethod: "bank",
+
       metadata: {
         withdrawalDetails: {
           accountName,
+
           accountNumber,
+
           bankCode,
         },
-        transaction_reference: transactionRef, // ✅ FIXED
+
+        transactionRef,
       },
     });
 
-    await transaction.save({ session });
+    await transaction.save({
+      session,
+    });
 
-    // Deduct amount from wallet (immediately to prevent double spending)
-    wallet.balance -= amount;
-    await wallet.save({ session });
+    /**
+     * DEDUCT USER BALANCE
+     */
+    wallet.balance -= Number(amount);
 
-    // Initiate withdrawal with Squad API
+    await wallet.save({
+      session,
+    });
+
+    /**
+     * INITIATE WITHDRAWAL
+     */
     try {
-      const withdrawalData = {
+      const withdrawalPayload = {
         amount,
         bankCode,
         accountNumber,
         accountName,
-        currency: wallet.currency,
         transactionRef,
-        description: description || "Withdrawal from wallet",
-        userId: user._id.toString(),
-        uprn: withdrawalUprn,
+        description,
       };
 
-      const squadResponse = await squadApi.initiateWithdrawal(withdrawalData);
+      console.log("🔥 CONTROLLER PAYLOAD:", withdrawalPayload);
 
-      // Update withdrawal payment with Squad response
+      const squadResponse =
+        await squadApi.initiateWithdrawal(withdrawalPayload);
+
+      /**
+       * STORE GATEWAY RESPONSE
+       */
       withdrawalPayment.gatewayResponse = squadResponse;
-      withdrawalPayment.status = "processing"; // Squad is processing the withdrawal
-      withdrawalPayment.squadRef = squadResponse.data?.reference || null;
-      await withdrawalPayment.save({ session });
 
-      // Also update transaction status
-      transaction.status = "processing";
-      transaction.externalReference = squadResponse.data?.reference || null;
-      await transaction.save({ session });
+      /**
+       * VERY IMPORTANT
+       * DO NOT TRUST ONLY STATUS CODE
+       */
+      const nipReference = squadResponse?.data?.nip_transaction_reference;
 
-      // Commit the transaction
+      /**
+       * HANDLE PENDING REQUERY
+       */
+      if (!nipReference) {
+        withdrawalPayment.status = "pending_requery";
+
+        transaction.status = "pending";
+      } else {
+        withdrawalPayment.status = "processing";
+
+        transaction.status = "processing";
+      }
+
+      /**
+       * SAVE NIP REFERENCE
+       */
+      withdrawalPayment.squadRef = nipReference || null;
+
+      transaction.externalReference = nipReference || null;
+
+      await withdrawalPayment.save({
+        session,
+      });
+
+      await transaction.save({
+        session,
+      });
+
+      /**
+       * COMMIT TRANSACTION
+       */
       await session.commitTransaction();
+
       session.endSession();
 
       return res.status(200).json({
         success: true,
-        message: "Withdrawal initiated successfully",
+
+        message: !nipReference
+          ? "Withdrawal initiated and pending confirmation"
+          : "Withdrawal initiated successfully",
+
         data: {
           withdrawal: {
             id: withdrawalPayment._id,
+
             transactionRef,
-            squadRef: squadResponse.data?.reference,
+
+            squadRef: nipReference,
+
             amount,
-            currency: wallet.currency,
+
+            currency: "NGN",
+
             status: withdrawalPayment.status,
           },
+
           transaction: {
             id: transaction._id,
+
             reference: withdrawalUprn,
+
             amount,
-            currency: wallet.currency,
+
+            currency: "NGN",
+
             status: transaction.status,
           },
         },
       });
     } catch (error) {
-      console.error("Error initiating withdrawal with Squad:", error);
+      console.error(
+        "Squad transfer failed:",
+        error.response?.data || error.message,
+      );
 
-      // If Squad API fails, mark as failed and return remaining balance to wallet
+      /**
+       * REFUND USER
+       */
+      wallet.balance += Number(amount);
+
+      await wallet.save({
+        session,
+      });
+
+      /**
+       * UPDATE WITHDRAWAL STATUS
+       */
       withdrawalPayment.status = "failed";
+
       withdrawalPayment.errorMessage =
         error.response?.data?.message || error.message;
+
       withdrawalPayment.errorCode = error.response?.status || "NETWORK_ERROR";
-      await withdrawalPayment.save({ session });
 
-      // Update transaction status
+      /**
+       * UPDATE TRANSACTION STATUS
+       */
       transaction.status = "failed";
-      await transaction.save({ session });
 
-      // Return funds to wallet
-      wallet.balance += amount;
-      await wallet.save({ session });
+      await withdrawalPayment.save({
+        session,
+      });
 
-      // Commit the transaction (even in failure case, we need to record this)
+      await transaction.save({
+        session,
+      });
+
+      /**
+       * COMMIT FAILURE STATE
+       */
       await session.commitTransaction();
+
       session.endSession();
 
       return res.status(500).json({
         success: false,
+
         message: "Failed to process withdrawal",
+
         error: error.response?.data?.message || error.message,
       });
     }
   } catch (error) {
-    // Abort transaction on error
+    console.error("Withdrawal controller error:", error);
+
     await session.abortTransaction();
+
     session.endSession();
 
-    console.error("Error initiating withdrawal:", error);
     return res.status(500).json({
       success: false,
+
       message: "Failed to initiate withdrawal",
+
       error: error.message,
     });
   }
 };
 
 /**
- * Verify a withdrawal status
+ * VERIFY / REQUERY WITHDRAWAL
  * @route POST /api/payments/withdrawal/verify
  */
 exports.verifyWithdrawal = async (req, res) => {
@@ -229,7 +408,9 @@ exports.verifyWithdrawal = async (req, res) => {
       });
     }
 
-    // Find the withdrawal payment
+    /**
+     * FIND WITHDRAWAL
+     */
     const withdrawalPayment = await WithdrawalPayment.findOne({
       transactionRef,
     });
@@ -241,134 +422,104 @@ exports.verifyWithdrawal = async (req, res) => {
       });
     }
 
-    // If withdrawal is already completed (successful or failed), return current status
-    if (["successful", "failed"].includes(withdrawalPayment.status)) {
-      // Get transaction details
-      const transaction = await Transaction.findOne({
-        "metadata.transactionRef": transactionRef,
-      });
-
+    /**
+     * IF ALREADY COMPLETED
+     */
+    if (
+      ["successful", "failed", "reversed"].includes(withdrawalPayment.status)
+    ) {
       return res.status(200).json({
         success: true,
+
         message: `Withdrawal status: ${withdrawalPayment.status}`,
-        data: {
-          withdrawal: {
-            id: withdrawalPayment._id,
-            transactionRef: withdrawalPayment.transactionRef,
-            squadRef: withdrawalPayment.squadRef,
-            amount: withdrawalPayment.amount,
-            currency_id: 1,
-            status: withdrawalPayment.status,
-            createdAt: withdrawalPayment.createdAt,
-          },
-          transaction: transaction
-            ? {
-                id: transaction._id,
-                reference: transaction.reference,
-                amount: transaction.amount,
-                currency: transaction.currency,
-                status: transaction.status,
-                createdAt: transaction.createdAt,
-              }
-            : null,
-        },
+
+        data: withdrawalPayment,
       });
     }
 
-    // Check status with Squad API if still processing
-    try {
-      const statusResponse = await squadApi.getWithdrawalStatus(transactionRef);
+    /**
+     * REQUERY SQUAD
+     */
+    const statusResponse = await squadApi.requeryTransfer(transactionRef);
 
-      // Update withdrawal with verification response
-      withdrawalPayment.gatewayResponse = statusResponse;
+    console.log("Squad requery response:", statusResponse);
 
-      let newStatus = "processing";
+    withdrawalPayment.gatewayResponse = statusResponse;
 
-      // Map Squad API status to our status
-      if (statusResponse.status === 200) {
-        const transferStatus = statusResponse.data?.status || "processing";
+    let newStatus = "processing";
 
-        if (
-          ["successful", "success", "completed"].includes(
-            transferStatus.toLowerCase(),
-          )
-        ) {
-          newStatus = "successful";
-        } else if (
-          ["failed", "failure", "declined", "rejected"].includes(
-            transferStatus.toLowerCase(),
-          )
-        ) {
-          newStatus = "failed";
-          withdrawalPayment.errorMessage =
-            statusResponse.data?.message || "Withdrawal failed";
-        }
-      }
+    const squadStatus = statusResponse?.data?.status?.toLowerCase() || "";
 
-      // Update withdrawal status
-      withdrawalPayment.status = newStatus;
-      await withdrawalPayment.save();
-
-      // Find and update transaction status
-      const transaction = await Transaction.findOne({
-        "metadata.transactionRef": transactionRef,
-      });
-
-      if (transaction) {
-        transaction.status =
-          newStatus === "successful" ? "completed" : newStatus;
-        await transaction.save();
-
-        // If withdrawal failed, return funds to wallet
-        if (newStatus === "failed") {
-          const wallet = await Wallet.findById(transaction.senderWallet);
-          if (wallet) {
-            wallet.balance += transaction.amount;
-            await wallet.save();
-          }
-        }
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: `Withdrawal status: ${newStatus}`,
-        data: {
-          withdrawal: {
-            id: withdrawalPayment._id,
-            transactionRef: withdrawalPayment.transactionRef,
-            squadRef: withdrawalPayment.squadRef,
-            amount: withdrawalPayment.amount,
-            currency: withdrawalPayment.currency,
-            status: withdrawalPayment.status,
-            createdAt: withdrawalPayment.createdAt,
-          },
-          transaction: transaction
-            ? {
-                id: transaction._id,
-                reference: transaction.reference,
-                amount: transaction.amount,
-                currency: transaction.currency,
-                status: transaction.status,
-                createdAt: transaction.createdAt,
-              }
-            : null,
-        },
-      });
-    } catch (error) {
-      console.error("Error verifying withdrawal with Squad:", error);
-
-      return res.status(500).json({
-        success: false,
-        message: "Failed to verify withdrawal status",
-        error: error.response?.data?.message || error.message,
-      });
+    /**
+     * MAP STATUS
+     */
+    if (["successful", "success", "completed"].includes(squadStatus)) {
+      newStatus = "successful";
+    } else if (
+      ["failed", "failure", "declined", "rejected", "reversed"].includes(
+        squadStatus,
+      )
+    ) {
+      newStatus = squadStatus;
     }
+
+    /**
+     * UPDATE WITHDRAWAL
+     */
+    withdrawalPayment.status = newStatus;
+
+    await withdrawalPayment.save();
+
+    /**
+     * UPDATE TRANSACTION
+     */
+    const transaction = await Transaction.findOne({
+      "metadata.transactionRef": transactionRef,
+    });
+
+    if (transaction) {
+      transaction.status = newStatus === "successful" ? "completed" : newStatus;
+
+      await transaction.save();
+
+      /**
+       * REFUND USER IF FAILED
+       */
+      if (["failed", "reversed"].includes(newStatus)) {
+        const wallet = await Wallet.findById(transaction.senderWallet);
+
+        if (wallet && !withdrawalPayment.refunded) {
+          wallet.balance += transaction.amount;
+
+          await wallet.save();
+
+          withdrawalPayment.refunded = true;
+
+          await withdrawalPayment.save();
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+
+      message: `Withdrawal status: ${newStatus}`,
+
+      data: {
+        withdrawal: withdrawalPayment,
+
+        transaction,
+      },
+    });
   } catch (error) {
-    console.error("Error verifying withdrawal:", error);
+    console.error("Verify withdrawal error:", error);
+
     return res.status(500).json({
       success: false,
+
       message: "Failed to verify withdrawal",
-      error: error.message,
+
+      error: error.response?.data?.message || error.message,
     });
   }
 };
@@ -379,86 +530,115 @@ exports.verifyWithdrawal = async (req, res) => {
  */
 exports.webhookHandler = async (req, res) => {
   try {
-    // Verify webhook signature (implementation depends on Squad API requirements)
-    // ...
-
     const event = req.body;
-    console.log("Received withdrawal webhook:", event);
 
-    // Extract transaction reference from webhook
-    const transactionRef = event.data?.transaction_ref || event.data?.reference;
+    console.log("Received Squad webhook:", event);
+
+    /**
+     * GET TRANSACTION REFERENCE
+     */
+    const transactionRef =
+      event.data?.transaction_reference ||
+      event.data?.transaction_ref ||
+      event.data?.reference;
 
     if (!transactionRef) {
-      console.error("No transaction reference in webhook");
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid webhook payload" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid webhook payload",
+      });
     }
 
-    // Find withdrawal by transaction reference
+    /**
+     * FIND WITHDRAWAL
+     */
     const withdrawalPayment = await WithdrawalPayment.findOne({
-      $or: [{ transactionRef }, { squadRef: transactionRef }],
+      transactionRef,
     });
 
     if (!withdrawalPayment) {
-      console.error(
-        `Withdrawal not found for transaction ref: ${transactionRef}`,
-      );
-      return res
-        .status(404)
-        .json({ success: false, message: "Withdrawal not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Withdrawal not found",
+      });
     }
 
-    // If withdrawal is already processed, ignore
-    if (["successful", "failed"].includes(withdrawalPayment.status)) {
-      return res
-        .status(200)
-        .json({ success: true, message: "Withdrawal already processed" });
+    /**
+     * PREVENT DOUBLE PROCESSING
+     */
+    if (
+      ["successful", "failed", "reversed"].includes(withdrawalPayment.status)
+    ) {
+      return res.status(200).json({
+        success: true,
+        message: "Withdrawal already processed",
+      });
     }
 
-    // Map webhook event status to our status
-    const status = event.data?.status || "processing";
+    /**
+     * GET STATUS
+     */
+    const status = event.data?.status?.toLowerCase() || "processing";
+
     let newStatus = "processing";
 
-    if (["successful", "success", "completed"].includes(status.toLowerCase())) {
+    /**
+     * MAP STATUS
+     */
+    if (["successful", "success", "completed"].includes(status)) {
       newStatus = "successful";
     } else if (
-      ["failed", "failure", "declined", "rejected"].includes(
-        status.toLowerCase(),
-      )
+      ["failed", "failure", "declined", "rejected", "reversed"].includes(status)
     ) {
-      newStatus = "failed";
-      withdrawalPayment.errorMessage =
-        event.data?.message || "Withdrawal failed";
+      newStatus = status;
     }
 
-    // Update withdrawal status
+    /**
+     * UPDATE WITHDRAWAL
+     */
     withdrawalPayment.status = newStatus;
+
     withdrawalPayment.gatewayResponse = event.data;
+
     withdrawalPayment.gatewayResponseCode = event.data?.response_code || "";
+
     await withdrawalPayment.save();
 
-    // Find and update transaction status
+    /**
+     * FIND TRANSACTION
+     */
     const transaction = await Transaction.findOne({
       "metadata.transactionRef": withdrawalPayment.transactionRef,
     });
 
     if (transaction) {
       transaction.status = newStatus === "successful" ? "completed" : newStatus;
+
       await transaction.save();
 
-      // If withdrawal failed, return funds to wallet
-      if (newStatus === "failed") {
+      /**
+       * REFUND USER
+       */
+      if (["failed", "reversed"].includes(newStatus)) {
         const wallet = await Wallet.findById(transaction.senderWallet);
-        if (wallet) {
+
+        /**
+         * PREVENT DOUBLE REFUND
+         */
+        if (wallet && !withdrawalPayment.refunded) {
           wallet.balance += transaction.amount;
+
           await wallet.save();
+
+          withdrawalPayment.refunded = true;
+
+          await withdrawalPayment.save();
         }
       }
     }
 
     console.log(
-      `Withdrawal ${newStatus}: ${withdrawalPayment.amount} ${withdrawalPayment.currency} for user ${withdrawalPayment.userId}`,
+      `Withdrawal ${newStatus}: ${withdrawalPayment.amount} ${withdrawalPayment.currency}`,
     );
 
     return res.status(200).json({
@@ -467,6 +647,7 @@ exports.webhookHandler = async (req, res) => {
     });
   } catch (error) {
     console.error("Webhook processing error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Webhook processing error",
@@ -526,12 +707,15 @@ exports.resolveAccount = async (req, res) => {
       });
     }
 
-    const accountResponse = await squadApi.resolveBankAccount(
+    /**
+     * USE SQUAD LOOKUP
+     */
+    const accountResponse = await squadApi.lookupAccount({
       accountNumber,
       bankCode,
-    );
+    });
 
-    if (!accountResponse || accountResponse.status !== 200) {
+    if (!accountResponse || !accountResponse.success) {
       return res.status(400).json({
         success: false,
         message: "Could not resolve bank account",
@@ -540,17 +724,23 @@ exports.resolveAccount = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+
       data: {
         accountName: accountResponse.data?.account_name,
+
         accountNumber,
+
         bankCode,
       },
     });
   } catch (error) {
     console.error("Error resolving bank account:", error);
+
     return res.status(500).json({
       success: false,
+
       message: "Failed to resolve bank account",
+
       error: error.response?.data?.message || error.message,
     });
   }

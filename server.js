@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 require("dotenv").config();
+const axios = require("axios");
 
 // Import Routes
 const userRoutes = require("./routes/userRoutes");
@@ -20,6 +21,28 @@ const startEscrowExpiryCron = require("./cron/escrowExpiry");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+app.get("/squad-balance", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://sandbox-api-d.squadco.com/merchant/balance",
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.SQUAD_SECRET_KEY}`,
+        },
+      },
+    );
+
+    return res.json(response.data);
+  } catch (error) {
+    console.log(error.response?.data);
+
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
 
 // Log environment variables (redacted for security)
 console.log("Environment loaded:");
