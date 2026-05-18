@@ -14,10 +14,12 @@ const escrowRoutes = require("./routes/escrowRoutes");
 const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
+const transferRoutes = require("./routes/transferRoutes");
 
 // Import Cron Jobs
 const startQuoteNotificationCron = require("./cron/quoteNotifications");
 const startEscrowExpiryCron = require("./cron/escrowExpiry");
+const bankService = require("./services/bankService");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -85,6 +87,7 @@ app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/transactions", transactionRoutes);
+app.use("/api/transfers", transferRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -115,6 +118,7 @@ app.get("/api", (req, res) => {
       escrow: "/api/escrow",
       escrowTransactions: "/api/escrow-transactions",
       notifications: "/api/notifications",
+      transfers: "/api/transfers",
     },
   });
 });
@@ -122,6 +126,17 @@ app.get("/api", (req, res) => {
 // Start Server
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+
+  // Start bank sync in background
+  bankService
+    .syncBanksFromSquad()
+    .then(() => console.log("✅ Squad bank list synced to DB"))
+    .catch((err) =>
+      console.warn(
+        "⚠️ Failed to sync Squad bank list on startup:",
+        err.message || err,
+      ),
+    );
 
   // Start cron jobs
   startQuoteNotificationCron();

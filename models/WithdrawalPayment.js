@@ -35,6 +35,15 @@ const withdrawalPaymentSchema = new mongoose.Schema(
       type: String,
       index: { unique: true, sparse: true },
     },
+    idempotencyKey: {
+      type: String,
+      index: { unique: true, sparse: true },
+    },
+    flowType: {
+      type: String,
+      enum: ["withdrawal", "external_bank_transfer"],
+      default: "withdrawal",
+    },
 
     // Bank account details
     bankCode: {
@@ -53,7 +62,7 @@ const withdrawalPaymentSchema = new mongoose.Schema(
     // Payment status
     status: {
       type: String,
-      enum: ["pending", "processing", "successful", "failed"],
+      enum: ["initiated", "pending", "processing", "success", "successful", "failed", "reversed"],
       default: "pending",
     },
 
@@ -63,6 +72,31 @@ const withdrawalPaymentSchema = new mongoose.Schema(
     },
     gatewayResponseCode: {
       type: String,
+    },
+
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+
+    providerResponses: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    auditTrail: {
+      type: [
+        {
+          status: String,
+          message: String,
+          metadata: mongoose.Schema.Types.Mixed,
+          createdAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      default: [],
     },
 
     // Transaction ID (after successful withdrawal)

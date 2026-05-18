@@ -2,6 +2,7 @@ const User = require("../models/User");
 const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const { v4: uuidv4 } = require("uuid");
 const {
   generateAccountNumber,
@@ -18,6 +19,7 @@ const {
   getCurrencyForUser,
 } = require("../utils/transactionFeeUtils");
 const Notification = require("../models/Notification");
+const transferService = require("../services/transfer.service");
 
 /**
  * Initialize wallet for a user
@@ -493,12 +495,46 @@ exports.getTransactionHistory = async (req, res) => {
  * @route POST /api/wallet/transfer
  */
 exports.transferFunds = async (req, res) => {
+  try {
+    const result = await transferService.internalTransfer({
+      user: req.user,
+      recipientAccount: req.body.recipientAccount,
+      amount: Number(req.body.amount),
+      description: req.body.description,
+      transactionPin: req.body.transactionPin,
+      idempotencyKey:
+        req.headers["idempotency-key"] ||
+        req.headers["x-idempotency-key"] ||
+        req.body.idempotencyKey,
+    });
+
+    return res.status(result.repeated ? 200 : 201).json({
+      success: true,
+      repeated: result.repeated,
+      data: {
+        transactionId: result.transaction._id,
+        reference: result.transaction.reference,
+        amount: result.transaction.amount,
+        fee: result.transaction.fee,
+        total: result.transaction.total,
+        currency: result.transaction.currency,
+        status: result.transaction.status,
+        senderBalance: result.senderBalance,
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Error processing transfer",
+    });
+  }
+
   // Start a transaction session
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { recipientAccount, amount, description } = req.body;
+    const { recipientAccount, amount, description, transactionPin } = req.body;
     const senderId = req.user._id;
 
     // Validate input
@@ -506,6 +542,32 @@ exports.transferFunds = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Recipient account and amount are required",
+      });
+    }
+
+    if (!transactionPin) {
+      return res.status(400).json({
+        success: false,
+        message: "Transaction PIN is required to complete this transfer",
+      });
+    }
+
+    if (!req.user.transactionPinHash) {
+      return res.status(400).json({
+        success: false,
+        message: "Transaction PIN is not configured for your account",
+      });
+    }
+
+    const isPinValid = await bcrypt.compare(
+      transactionPin,
+      req.user.transactionPinHash,
+    );
+
+    if (!isPinValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid transaction PIN",
       });
     }
 

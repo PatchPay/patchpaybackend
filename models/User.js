@@ -28,6 +28,11 @@ const userSchema = new Schema({
     required: true,
   },
 
+  transactionPinHash: {
+    type: String,
+    select: false,
+  },
+
   country: {
     type: String,
     required: true,

@@ -37,8 +37,10 @@ const transactionSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        "initiated",
         "pending",
         "completed",
+        "success",
         "processing",
         "failed",
         "reversed",
@@ -119,8 +121,41 @@ const transactionSchema = new mongoose.Schema(
     // Payment gateway for deposits
     paymentGateway: {
       type: String,
-      enum: ["GTB", "Switch", "Internal"],
+      enum: ["GTB", "Switch", "Internal", "SquadCo"],
       default: "Internal",
+    },
+
+    idempotencyKey: {
+      type: String,
+      index: { unique: true, sparse: true },
+    },
+
+    provider: {
+      type: String,
+    },
+
+    providerReference: {
+      type: String,
+    },
+
+    providerResponses: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    auditTrail: {
+      type: [
+        {
+          status: String,
+          message: String,
+          metadata: mongoose.Schema.Types.Mixed,
+          createdAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      default: [],
     },
 
     // Name provided by payment method (for verification)

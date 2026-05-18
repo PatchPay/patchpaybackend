@@ -11,6 +11,10 @@ router.use(authenticateToken);
 
 // Withdrawal routes
 router.post("/initiate", withdrawalController.initiateWithdrawal);
+router.post(
+  "/external-transfer",
+  withdrawalController.initiateExternalTransfer,
+);
 router.post("/verify", withdrawalController.verifyWithdrawal);
 router.get("/banks", withdrawalController.getBanks);
 router.post("/resolve-account", withdrawalController.resolveAccount);
