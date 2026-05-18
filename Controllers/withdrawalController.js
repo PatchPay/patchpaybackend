@@ -90,7 +90,8 @@ exports.verifyWithdrawal = async (req, res) => {
       });
     }
 
-    const result = await transferService.verifyExternalTransferStatus(transactionRef);
+    const result =
+      await transferService.verifyExternalTransferStatus(transactionRef);
     return res.status(200).json({
       success: true,
       message: `Withdrawal status: ${result.withdrawal.status}`,
@@ -170,44 +171,45 @@ exports.getBanks = async (req, res) => {
  * Resolve bank account
  * @route POST /api/payments/withdrawal/resolve-account
  */
+
 exports.resolveAccount = async (req, res) => {
   try {
-    const { account_number, bank_code } = req.body;
+    const accountNumber = req.body.accountNumber || req.body.account_number;
 
-    if (!account_number || !bank_code) {
+    const bankCode = req.body.bankCode || req.body.bank_code;
+
+    console.log("DEBUG ACCOUNT:", accountNumber);
+    console.log("DEBUG BANK:", bankCode);
+
+    if (!accountNumber || !bankCode) {
       return res.status(400).json({
         success: false,
-        message: "Account number and bank code are required",
+        message: "accountNumber and bankCode are required",
       });
     }
 
-    const accountResponse = await transferService.accountLookup({
-      accountNumber: account_number,
-      bankCode: bank_code,
+    const squadRes = await squadApi.lookupAccount({
+      accountNumber,
+      bankCode,
     });
 
     return res.status(200).json({
       success: true,
-
       data: {
-        accountName: accountResponse.accountName,
-
-        account_number,
-
-        bank_code,
-
+        accountName: squadRes.data?.account_name,
+        accountNumber: squadRes.data?.account_number,
         verified: true,
       },
     });
   } catch (error) {
-    console.error("Error resolving bank account:", error);
+    console.error("Resolve account error:", error.response?.data || error);
 
     return res.status(500).json({
       success: false,
-
-      message: "Failed to resolve bank account",
-
-      error: error.response?.data?.message || error.message,
+      message:
+        error.response?.data?.message ||
+        error.message ||
+        "Failed to resolve bank account",
     });
   }
 };
