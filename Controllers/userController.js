@@ -535,6 +535,45 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
+const setTransactionPin = async (req, res) => {
+  try {
+    const { transactionPin, confirmTransactionPin } = req.body;
+
+    if (!transactionPin || !confirmTransactionPin) {
+      return res.status(400).json({
+        message: "transactionPin and confirmTransactionPin are required",
+      });
+    }
+
+    if (transactionPin !== confirmTransactionPin) {
+      return res.status(400).json({
+        message: "Transaction PINs do not match",
+      });
+    }
+
+    if (transactionPin.length < 4 || transactionPin.length > 6) {
+      return res.status(400).json({
+        message: "Transaction PIN must be between 4 and 6 digits",
+      });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.transactionPinHash = await bcrypt.hash(transactionPin, 10);
+    await user.save();
+
+    res.status(200).json({
+      message: "Transaction PIN configured successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error setting transaction PIN:", error);
+    res.status(500).json({ message: "Error setting transaction PIN" });
+  }
+};
+
 // Export all controller functions
 module.exports = {
   registerUser,
@@ -544,5 +583,5 @@ module.exports = {
   logout,
   getUserProfile,
   updateUserProfile,
-  // Add other controller functions here
+  setTransactionPin,
 };

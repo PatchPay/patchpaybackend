@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { authMiddleware } = require("../middlewares/authMiddleware");
 
 const {
   getAllTransactions,
@@ -7,6 +8,8 @@ const {
   createTransaction,
   getUserTransactions,
 } = require("../Controllers/transactionController");
+
+router.use(authMiddleware);
 
 // ── Routes ─────────────────────────────────────────
 

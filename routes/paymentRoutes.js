@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const paymentController = require("../Controllers/paymentController");
-const depositRoutes = require("./depositRoutes");
+const depositRoutes = require("../routes/depositRoutes");
 const { authMiddleware } = require("../middlewares/authMiddleware");
-const withdrawalRoutes = require("./withdrawalRoutes");
+const withdrawalRoutes = require("../routes/withdrawalRoutes");
 
 // Use the deposit routes for /deposit endpoints
 router.use("/deposit", depositRoutes);

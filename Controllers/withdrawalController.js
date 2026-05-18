@@ -3,8 +3,10 @@ const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const User = require("../models/User");
 const mongoose = require("mongoose");
-const { generateUPRN } = require("../utils/paymentUtils");
+const payoutService = require("../services/payoutService");
+const bankService = require("../services/bankService");
 const squadApi = require("../utils/squadApiUtils");
+const transferService = require("../services/transfer.service");
 
 /**
  * Initiate a withdrawal request
@@ -17,386 +19,66 @@ const squadApi = require("../utils/squadApiUtils");
  * @route POST /api/payments/withdrawal/initiate
  */
 exports.initiateWithdrawal = async (req, res) => {
-  const session = await mongoose.startSession();
-
-  session.startTransaction();
-
   try {
-    /**
-     * USER
-     */
     const user = req.user;
+    const idempotencyKey =
+      req.headers["x-idempotency-key"] || req.body.idempotencyKey;
+    const transactionPin = req.body.transactionPin;
+    const payload = {
+      user,
+      amount: req.body.amount,
+      bankCode: req.body.bankCode || req.body.bank_code,
+      accountNumber: req.body.accountNumber || req.body.account_number,
+      accountName: req.body.accountName,
+      description: req.body.description,
+      transactionPin,
+      idempotencyKey,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+      flowType: req.body.flowType || "withdrawal",
+    };
 
-    /**
-     * REQUEST BODY
-     */
-    const { amount, bankCode, accountNumber, accountName, description } =
-      req.body;
+    const result = await transferService.externalBankTransfer(payload);
+    const withdrawal = result.withdrawal;
+    const transaction = result.transaction;
 
-    /**
-     * VALIDATIONS
-     */
-    if (!amount || isNaN(amount) || Number(amount) <= 0) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid amount",
-      });
-    }
-
-    if (!bankCode || !accountNumber || !accountName) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Bank details are required",
-      });
-    }
-
-    /**
-     * VERIFY ACCOUNT USING SQUAD
-     */
-    const accountLookup = await squadApi.lookupAccount({
-      bankCode,
-      accountNumber,
-    });
-
-    if (!accountLookup || !accountLookup.success || !accountLookup.data) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Unable to verify bank account",
-      });
-    }
-
-    /**
-     * ACCOUNT NAME MATCH CHECK
-     */
-    const resolvedAccountName = accountLookup.data.account_name;
-
-    if (
-      resolvedAccountName.toLowerCase().trim() !==
-      accountName.toLowerCase().trim()
-    ) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Account name mismatch",
-        data: {
-          squadAccountName: resolvedAccountName,
+    return res.status(200).json({
+      success: true,
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          transactionRef: withdrawal.transactionRef,
+          squadRef: withdrawal.squadRef,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          status: withdrawal.status,
         },
-      });
-    }
-
-    /**
-     * FIND WALLET
-     */
-    const wallet = await Wallet.findOne({
-      userId: user._id,
-    }).session(session);
-
-    if (!wallet) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(404).json({
-        success: false,
-        message: "Wallet not found",
-      });
-    }
-
-    /**
-     * ONLY NGN
-     */
-    if (wallet.currency !== "NGN") {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Withdrawals are only supported in NGN",
-      });
-    }
-
-    /**
-     * CHECK BALANCE
-     */
-    if (Number(wallet.balance) < Number(amount)) {
-      await session.abortTransaction();
-      session.endSession();
-
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance",
-      });
-    }
-
-    /**
-     * GENERATE REFERENCES
-     */
-    const withdrawalUprn = generateUPRN(user._id, "withdrawal");
-
-    const merchantId = process.env.SQUAD_MERCHANT_ID.trim();
-
-    const transactionRef = `${merchantId}_${Date.now()}`;
-
-    /**
-     * CREATE WITHDRAWAL RECORD
-     */
-    const withdrawalPayment = new WithdrawalPayment({
-      userId: user._id,
-
-      amount,
-
-      currency: "NGN",
-
-      transactionRef,
-
-      bankCode,
-
-      accountNumber,
-
-      accountName,
-
-      status: "pending",
-    });
-
-    await withdrawalPayment.save({
-      session,
-    });
-
-    /**
-     * CREATE TRANSACTION RECORD
-     */
-    const transaction = new Transaction({
-      senderId: user._id,
-
-      senderWallet: wallet._id,
-
-      total: amount,
-
-      amount,
-
-      currency: "NGN",
-
-      type: "withdrawal",
-
-      status: "pending",
-
-      reference: withdrawalUprn,
-
-      isUserAccountTransfer: true,
-
-      description: description || "Withdrawal from wallet",
-
-      paymentMethod: "bank",
-
-      metadata: {
-        withdrawalDetails: {
-          accountName,
-
-          accountNumber,
-
-          bankCode,
-        },
-
-        transactionRef,
+        transaction: transaction
+          ? {
+              id: transaction._id,
+              reference: transaction.reference,
+              amount: transaction.amount,
+              currency: transaction.currency,
+              status: transaction.status,
+            }
+          : null,
       },
+      repeated: result.repeated || false,
     });
-
-    await transaction.save({
-      session,
-    });
-
-    /**
-     * DEDUCT USER BALANCE
-     */
-    wallet.balance -= Number(amount);
-
-    await wallet.save({
-      session,
-    });
-
-    /**
-     * INITIATE WITHDRAWAL
-     */
-    try {
-      const withdrawalPayload = {
-        amount,
-        bankCode,
-        accountNumber,
-        accountName,
-        transactionRef,
-        description,
-      };
-
-      console.log("🔥 CONTROLLER PAYLOAD:", withdrawalPayload);
-
-      const squadResponse =
-        await squadApi.initiateWithdrawal(withdrawalPayload);
-
-      /**
-       * STORE GATEWAY RESPONSE
-       */
-      withdrawalPayment.gatewayResponse = squadResponse;
-
-      /**
-       * VERY IMPORTANT
-       * DO NOT TRUST ONLY STATUS CODE
-       */
-      const nipReference = squadResponse?.data?.nip_transaction_reference;
-
-      /**
-       * HANDLE PENDING REQUERY
-       */
-      if (!nipReference) {
-        withdrawalPayment.status = "pending_requery";
-
-        transaction.status = "pending";
-      } else {
-        withdrawalPayment.status = "processing";
-
-        transaction.status = "processing";
-      }
-
-      /**
-       * SAVE NIP REFERENCE
-       */
-      withdrawalPayment.squadRef = nipReference || null;
-
-      transaction.externalReference = nipReference || null;
-
-      await withdrawalPayment.save({
-        session,
-      });
-
-      await transaction.save({
-        session,
-      });
-
-      /**
-       * COMMIT TRANSACTION
-       */
-      await session.commitTransaction();
-
-      session.endSession();
-
-      return res.status(200).json({
-        success: true,
-
-        message: !nipReference
-          ? "Withdrawal initiated and pending confirmation"
-          : "Withdrawal initiated successfully",
-
-        data: {
-          withdrawal: {
-            id: withdrawalPayment._id,
-
-            transactionRef,
-
-            squadRef: nipReference,
-
-            amount,
-
-            currency: "NGN",
-
-            status: withdrawalPayment.status,
-          },
-
-          transaction: {
-            id: transaction._id,
-
-            reference: withdrawalUprn,
-
-            amount,
-
-            currency: "NGN",
-
-            status: transaction.status,
-          },
-        },
-      });
-    } catch (error) {
-      console.error(
-        "Squad transfer failed:",
-        error.response?.data || error.message,
-      );
-
-      /**
-       * REFUND USER
-       */
-      wallet.balance += Number(amount);
-
-      await wallet.save({
-        session,
-      });
-
-      /**
-       * UPDATE WITHDRAWAL STATUS
-       */
-      withdrawalPayment.status = "failed";
-
-      withdrawalPayment.errorMessage =
-        error.response?.data?.message || error.message;
-
-      withdrawalPayment.errorCode = error.response?.status || "NETWORK_ERROR";
-
-      /**
-       * UPDATE TRANSACTION STATUS
-       */
-      transaction.status = "failed";
-
-      await withdrawalPayment.save({
-        session,
-      });
-
-      await transaction.save({
-        session,
-      });
-
-      /**
-       * COMMIT FAILURE STATE
-       */
-      await session.commitTransaction();
-
-      session.endSession();
-
-      return res.status(500).json({
-        success: false,
-
-        message: "Failed to process withdrawal",
-
-        error: error.response?.data?.message || error.message,
-      });
-    }
   } catch (error) {
-    console.error("Withdrawal controller error:", error);
-
-    await session.abortTransaction();
-
-    session.endSession();
-
-    return res.status(500).json({
+    console.error("Withdrawal initiation error:", error.message || error);
+    return res.status(400).json({
       success: false,
-
-      message: "Failed to initiate withdrawal",
-
-      error: error.message,
+      message: error.message || "Failed to initiate withdrawal",
     });
   }
 };
 
-/**
- * VERIFY / REQUERY WITHDRAWAL
- * @route POST /api/payments/withdrawal/verify
- */
+exports.initiateExternalTransfer = async (req, res) => {
+  req.body.flowType = "external_bank_transfer";
+  return exports.initiateWithdrawal(req, res);
+};
+
 exports.verifyWithdrawal = async (req, res) => {
   try {
     const { transactionRef } = req.body;
@@ -408,118 +90,20 @@ exports.verifyWithdrawal = async (req, res) => {
       });
     }
 
-    /**
-     * FIND WITHDRAWAL
-     */
-    const withdrawalPayment = await WithdrawalPayment.findOne({
-      transactionRef,
-    });
-
-    if (!withdrawalPayment) {
-      return res.status(404).json({
-        success: false,
-        message: "Withdrawal not found",
-      });
-    }
-
-    /**
-     * IF ALREADY COMPLETED
-     */
-    if (
-      ["successful", "failed", "reversed"].includes(withdrawalPayment.status)
-    ) {
-      return res.status(200).json({
-        success: true,
-
-        message: `Withdrawal status: ${withdrawalPayment.status}`,
-
-        data: withdrawalPayment,
-      });
-    }
-
-    /**
-     * REQUERY SQUAD
-     */
-    const statusResponse = await squadApi.requeryTransfer(transactionRef);
-
-    console.log("Squad requery response:", statusResponse);
-
-    withdrawalPayment.gatewayResponse = statusResponse;
-
-    let newStatus = "processing";
-
-    const squadStatus = statusResponse?.data?.status?.toLowerCase() || "";
-
-    /**
-     * MAP STATUS
-     */
-    if (["successful", "success", "completed"].includes(squadStatus)) {
-      newStatus = "successful";
-    } else if (
-      ["failed", "failure", "declined", "rejected", "reversed"].includes(
-        squadStatus,
-      )
-    ) {
-      newStatus = squadStatus;
-    }
-
-    /**
-     * UPDATE WITHDRAWAL
-     */
-    withdrawalPayment.status = newStatus;
-
-    await withdrawalPayment.save();
-
-    /**
-     * UPDATE TRANSACTION
-     */
-    const transaction = await Transaction.findOne({
-      "metadata.transactionRef": transactionRef,
-    });
-
-    if (transaction) {
-      transaction.status = newStatus === "successful" ? "completed" : newStatus;
-
-      await transaction.save();
-
-      /**
-       * REFUND USER IF FAILED
-       */
-      if (["failed", "reversed"].includes(newStatus)) {
-        const wallet = await Wallet.findById(transaction.senderWallet);
-
-        if (wallet && !withdrawalPayment.refunded) {
-          wallet.balance += transaction.amount;
-
-          await wallet.save();
-
-          withdrawalPayment.refunded = true;
-
-          await withdrawalPayment.save();
-        }
-      }
-    }
-
+    const result = await transferService.verifyExternalTransferStatus(transactionRef);
     return res.status(200).json({
       success: true,
-
-      message: `Withdrawal status: ${newStatus}`,
-
+      message: `Withdrawal status: ${result.withdrawal.status}`,
       data: {
-        withdrawal: withdrawalPayment,
-
-        transaction,
+        withdrawal: result.withdrawal,
+        transaction: result.transaction,
       },
     });
   } catch (error) {
-    console.error("Verify withdrawal error:", error);
-
+    console.error("Verify withdrawal error:", error.message || error);
     return res.status(500).json({
       success: false,
-
-      message: "Failed to verify withdrawal",
-
-      error: error.response?.data?.message || error.message,
+      message: error.message || "Failed to verify withdrawal",
     });
   }
 };
@@ -531,127 +115,24 @@ exports.verifyWithdrawal = async (req, res) => {
 exports.webhookHandler = async (req, res) => {
   try {
     const event = req.body;
+    const result = await payoutService.processWithdrawalWebhook(event);
 
-    console.log("Received Squad webhook:", event);
-
-    /**
-     * GET TRANSACTION REFERENCE
-     */
-    const transactionRef =
-      event.data?.transaction_reference ||
-      event.data?.transaction_ref ||
-      event.data?.reference;
-
-    if (!transactionRef) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid webhook payload",
-      });
-    }
-
-    /**
-     * FIND WITHDRAWAL
-     */
-    const withdrawalPayment = await WithdrawalPayment.findOne({
-      transactionRef,
-    });
-
-    if (!withdrawalPayment) {
-      return res.status(404).json({
-        success: false,
-        message: "Withdrawal not found",
-      });
-    }
-
-    /**
-     * PREVENT DOUBLE PROCESSING
-     */
-    if (
-      ["successful", "failed", "reversed"].includes(withdrawalPayment.status)
-    ) {
+    if (result.alreadyProcessed) {
       return res.status(200).json({
         success: true,
         message: "Withdrawal already processed",
       });
     }
 
-    /**
-     * GET STATUS
-     */
-    const status = event.data?.status?.toLowerCase() || "processing";
-
-    let newStatus = "processing";
-
-    /**
-     * MAP STATUS
-     */
-    if (["successful", "success", "completed"].includes(status)) {
-      newStatus = "successful";
-    } else if (
-      ["failed", "failure", "declined", "rejected", "reversed"].includes(status)
-    ) {
-      newStatus = status;
-    }
-
-    /**
-     * UPDATE WITHDRAWAL
-     */
-    withdrawalPayment.status = newStatus;
-
-    withdrawalPayment.gatewayResponse = event.data;
-
-    withdrawalPayment.gatewayResponseCode = event.data?.response_code || "";
-
-    await withdrawalPayment.save();
-
-    /**
-     * FIND TRANSACTION
-     */
-    const transaction = await Transaction.findOne({
-      "metadata.transactionRef": withdrawalPayment.transactionRef,
-    });
-
-    if (transaction) {
-      transaction.status = newStatus === "successful" ? "completed" : newStatus;
-
-      await transaction.save();
-
-      /**
-       * REFUND USER
-       */
-      if (["failed", "reversed"].includes(newStatus)) {
-        const wallet = await Wallet.findById(transaction.senderWallet);
-
-        /**
-         * PREVENT DOUBLE REFUND
-         */
-        if (wallet && !withdrawalPayment.refunded) {
-          wallet.balance += transaction.amount;
-
-          await wallet.save();
-
-          withdrawalPayment.refunded = true;
-
-          await withdrawalPayment.save();
-        }
-      }
-    }
-
-    console.log(
-      `Withdrawal ${newStatus}: ${withdrawalPayment.amount} ${withdrawalPayment.currency}`,
-    );
-
     return res.status(200).json({
       success: true,
       message: "Webhook processed successfully",
     });
   } catch (error) {
-    console.error("Webhook processing error:", error);
-
+    console.error("Webhook processing error:", error.message || error);
     return res.status(500).json({
       success: false,
-      message: "Webhook processing error",
-      error: error.message,
+      message: error.message || "Webhook processing error",
     });
   }
 };
@@ -662,28 +143,21 @@ exports.webhookHandler = async (req, res) => {
  */
 exports.getBanks = async (req, res) => {
   try {
-    const banksResponse = await squadApi.getBanks();
-
-    if (!banksResponse || banksResponse.status !== 200) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to retrieve banks list",
-      });
-    }
-
-    // Format banks data
-    const banks =
-      banksResponse.data?.map((bank) => ({
-        code: bank.code,
-        name: bank.name,
-      })) || [];
+    const banks = await bankService.getBanks({
+      forceRefresh: req.query.force === "true",
+    });
+    const formatted = banks.map((bank) => ({
+      code: bank.bank_code,
+      name: bank.name,
+      active: bank.active,
+    }));
 
     return res.status(200).json({
       success: true,
-      data: { banks },
+      data: { banks: formatted },
     });
   } catch (error) {
-    console.error("Error getting banks list:", error);
+    console.error("Error getting banks list:", error.message || error);
     return res.status(500).json({
       success: false,
       message: "Failed to get banks list",
@@ -698,39 +172,31 @@ exports.getBanks = async (req, res) => {
  */
 exports.resolveAccount = async (req, res) => {
   try {
-    const { accountNumber, bankCode } = req.body;
+    const { account_number, bank_code } = req.body;
 
-    if (!accountNumber || !bankCode) {
+    if (!account_number || !bank_code) {
       return res.status(400).json({
         success: false,
         message: "Account number and bank code are required",
       });
     }
 
-    /**
-     * USE SQUAD LOOKUP
-     */
-    const accountResponse = await squadApi.lookupAccount({
-      accountNumber,
-      bankCode,
+    const accountResponse = await transferService.accountLookup({
+      accountNumber: account_number,
+      bankCode: bank_code,
     });
-
-    if (!accountResponse || !accountResponse.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Could not resolve bank account",
-      });
-    }
 
     return res.status(200).json({
       success: true,
 
       data: {
-        accountName: accountResponse.data?.account_name,
+        accountName: accountResponse.accountName,
 
-        accountNumber,
+        account_number,
 
-        bankCode,
+        bank_code,
+
+        verified: true,
       },
     });
   } catch (error) {
@@ -771,7 +237,7 @@ exports.getWithdrawalHistory = async (req, res) => {
       id: withdrawal._id,
       amount: withdrawal.amount,
       currency: withdrawal.currency,
-      accountNumber: withdrawal.accountNumber,
+      account_number: withdrawal.account_number,
       accountName: withdrawal.accountName,
       status: withdrawal.status,
       transactionRef: withdrawal.transactionRef,

@@ -754,5 +754,10 @@ router.get("/reset-password-page", async (req, res) => {
 // Profile routes (protected by authentication)
 router.get("/profile", authenticateToken, userController.getUserProfile);
 router.put("/profile", authenticateToken, userController.updateUserProfile);
+router.post(
+  "/transaction-pin",
+  authenticateToken,
+  userController.setTransactionPin,
+);
 
 module.exports = router;

@@ -118,10 +118,12 @@ exports.requeryTransfer = async (ref) => {
  */
 exports.getBanks = async () => {
   try {
-    const res = await squadApi.get("/api/banks");
+      const res = await squadApi.post("/transaction/mandate/banklists");
     return res.data;
   } catch (err) {
-    throw err;
+    const payload = err.response?.data || err.message || "Unknown Squad bank list error";
+    console.error("Squad bank list error:", payload);
+    throw new Error(payload);
   }
 };
 
