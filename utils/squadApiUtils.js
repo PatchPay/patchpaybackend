@@ -5,8 +5,10 @@ const BASE_URL =
 
 const SQUAD_SECRET_KEY = process.env.SQUAD_SECRET_KEY;
 
-// AXIOS INSTANCE
-const squadApi = axios.create({
+// ========================
+// AXIOS INSTANCE (PRIVATE)
+// ========================
+const squadClient = axios.create({
   baseURL: BASE_URL,
   headers: {
     "Content-Type": "application/json",
@@ -14,7 +16,6 @@ const squadApi = axios.create({
   },
   timeout: 30000,
 });
-
 /**
  * INITIATE PAYMENT
  */
@@ -47,19 +48,14 @@ exports.initiatePayment = async (paymentData) => {
  * LOOKUP ACCOUNT (FIXED)
  */
 exports.lookupAccount = async ({ bankCode, accountNumber }) => {
-  try {
-    const payload = {
-      bank_code: bankCode,
-      account_number: accountNumber,
-    };
+  const payload = {
+    bank_code: bankCode,
+    account_number: accountNumber,
+  };
 
-    const res = await squadApi.post("/payout/account/lookup", payload);
+  const res = await squadClient.post("/payout/account/lookup", payload);
 
-    return res.data;
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    throw err;
-  }
+  return res.data;
 };
 
 /**
