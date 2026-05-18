@@ -118,10 +118,11 @@ exports.requeryTransfer = async (ref) => {
  */
 exports.getBanks = async () => {
   try {
-      const res = await squadApi.post("/transaction/mandate/banklists");
+    const res = await squadApi.post("/transaction/mandate/banklists");
     return res.data;
   } catch (err) {
-    const payload = err.response?.data || err.message || "Unknown Squad bank list error";
+    const payload =
+      err.response?.data || err.message || "Unknown Squad bank list error";
     console.error("Squad bank list error:", payload);
     throw new Error(payload);
   }
@@ -130,16 +131,39 @@ exports.getBanks = async () => {
 /**
  * RESOLVE ACCOUNT (FIXED)
  */
-exports.resolveBankAccount = async (accountNumber, bankCode) => {
+exports.resolveAccount = async (req, res) => {
   try {
-    const res = await squadApi.post("/payout/account/lookup", {
-      account_number: accountNumber,
-      bank_code: bankCode,
-    });
+    // ✅ Accept both camelCase (from app) and snake_case (legacy)
+    const accountNumber = req.body.accountNumber || req.body.account_number;
+    const bankCode = req.body.bankCode || req.body.bank_code;
 
-    return res.data;
-  } catch (err) {
-    throw err;
+    if (!accountNumber || !bankCode) {
+      return res.status(400).json({
+        success: false,
+        message: "accountNumber and bankCode are required",
+      });
+    }
+
+    const squadRes = await squadApi.lookupAccount({ accountNumber, bankCode });
+
+    // Squad returns: { status: 200, success: true, data: { account_name, account_number } }
+    return res.status(200).json({
+      success: true,
+      data: {
+        accountName: squadRes.data?.account_name,
+        accountNumber: squadRes.data?.account_number,
+        verified: true,
+      },
+    });
+  } catch (error) {
+    console.error("Error resolving bank account:", error);
+    return res.status(500).json({
+      success: false,
+      message:
+        error?.response?.data?.message ||
+        error.message ||
+        "Failed to resolve bank account",
+    });
   }
 };
 
