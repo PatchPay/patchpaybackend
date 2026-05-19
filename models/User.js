@@ -33,6 +33,11 @@ const userSchema = new Schema({
     select: false,
   },
 
+  hasTransactionPin: {
+    type: Boolean,
+    default: false,
+  },
+
   country: {
     type: String,
     required: true,
