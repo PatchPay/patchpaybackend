@@ -5,7 +5,7 @@ const bcrypt = require("bcryptjs");
 const Transaction = require("../models/Transaction");
 const WithdrawalPayment = require("../models/WithdrawalPayment");
 const User = require("../models/User");
-const bankService = require("./bankService");
+// const bankService = require("./bankService");
 const squadService = require("./squad.service");
 const walletService = require("./wallet.service");
 const { calculateTransactionFee } = require("../utils/transactionFeeUtils");
@@ -33,12 +33,17 @@ const verifyTransactionPin = async (user, transactionPin) => {
   }
 
   if (!user.transactionPinHash) {
-    const error = new Error("Transaction PIN is not configured for this account");
+    const error = new Error(
+      "Transaction PIN is not configured for this account",
+    );
     error.statusCode = 400;
     throw error;
   }
 
-  const isValidPin = await bcrypt.compare(transactionPin, user.transactionPinHash);
+  const isValidPin = await bcrypt.compare(
+    transactionPin,
+    user.transactionPinHash,
+  );
   if (!isValidPin) {
     const error = new Error("Invalid transaction PIN");
     error.statusCode = 401;
@@ -72,14 +77,10 @@ const mapWithdrawalStatus = (status) => {
 };
 
 const accountLookup = async ({ bankCode, accountNumber }) => {
-  const bank = await bankService.getBankByCode(bankCode);
-  if (!bank || !bank.active) {
-    const error = new Error("Selected bank is not available");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  return squadService.lookupAccount({ bankCode, accountNumber });
+  return squadService.lookupAccount({
+    bankCode,
+    accountNumber,
+  });
 };
 
 const internalTransfer = async ({
@@ -112,7 +113,10 @@ const internalTransfer = async ({
   session.startTransaction();
 
   try {
-    const senderWallet = await walletService.getActiveWalletForUser(user._id, session);
+    const senderWallet = await walletService.getActiveWalletForUser(
+      user._id,
+      session,
+    );
     if (!senderWallet) {
       const error = new Error("Sender wallet not found");
       error.statusCode = 404;
@@ -141,7 +145,9 @@ const internalTransfer = async ({
       throw error;
     }
 
-    const recipientUser = await User.findById(recipientWallet.userId).session(session);
+    const recipientUser = await User.findById(recipientWallet.userId).session(
+      session,
+    );
     if (!recipientUser) {
       const error = new Error("Recipient user not found");
       error.statusCode = 404;
@@ -199,7 +205,9 @@ const internalTransfer = async ({
   } catch (error) {
     await session.abortTransaction();
     if (error.code === 11000) {
-      const duplicate = await Transaction.findOne({ idempotencyKey: stableKey });
+      const duplicate = await Transaction.findOne({
+        idempotencyKey: stableKey,
+      });
       if (duplicate) return { transaction: duplicate, repeated: true };
     }
     throw error;
@@ -224,7 +232,11 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
     transaction.externalReference = payoutResult.providerReference;
     transaction.providerReference = payoutResult.providerReference;
     transaction.providerResponses.push(payoutResult.raw);
-    addAudit(transaction, transaction.status, "Transfer status updated from SquadCo");
+    addAudit(
+      transaction,
+      transaction.status,
+      "Transfer status updated from SquadCo",
+    );
 
     if (["failed", "reversed"].includes(status) && !withdrawal.refunded) {
       await walletService.creditWallet({
@@ -234,8 +246,16 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
       });
       withdrawal.refunded = true;
       transaction.status = "reversed";
-      addAudit(transaction, "reversed", "Wallet debit reversed after failed payout");
-      addAudit(withdrawal, "reversed", "Wallet debit reversed after failed payout");
+      addAudit(
+        transaction,
+        "reversed",
+        "Wallet debit reversed after failed payout",
+      );
+      addAudit(
+        withdrawal,
+        "reversed",
+        "Wallet debit reversed after failed payout",
+      );
     }
 
     await withdrawal.save({ session });
@@ -253,7 +273,8 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
 const markPayoutRetryable = async ({ withdrawal, transaction, error }) => {
   withdrawal.status = "processing";
   withdrawal.errorMessage = error.message;
-  withdrawal.errorCode = error.code || String(error.statusCode || "SQUAD_ERROR");
+  withdrawal.errorCode =
+    error.code || String(error.statusCode || "SQUAD_ERROR");
   withdrawal.gatewayResponse = error.providerResponse || {};
   addAudit(withdrawal, "processing", "SquadCo payout outcome unknown", {
     retryable: true,
@@ -293,7 +314,9 @@ const externalBankTransfer = async ({
 
   await verifyTransactionPin(user, transactionPin);
 
-  const existing = await WithdrawalPayment.findOne({ idempotencyKey: stableKey });
+  const existing = await WithdrawalPayment.findOne({
+    idempotencyKey: stableKey,
+  });
   if (existing) {
     const transaction = await Transaction.findOne({
       "metadata.transactionRef": existing.transactionRef,
@@ -308,7 +331,6 @@ const externalBankTransfer = async ({
     throw error;
   }
 
-  const bank = await bankService.getBankByCode(bankCode);
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -316,7 +338,10 @@ const externalBankTransfer = async ({
   let transaction;
 
   try {
-    const wallet = await walletService.getActiveWalletForUser(user._id, session);
+    const wallet = await walletService.getActiveWalletForUser(
+      user._id,
+      session,
+    );
     if (!wallet) {
       const error = new Error("Wallet not found");
       error.statusCode = 404;
@@ -324,7 +349,9 @@ const externalBankTransfer = async ({
     }
 
     if (wallet.currency !== "NGN") {
-      const error = new Error("External bank transfers are only supported in NGN");
+      const error = new Error(
+        "External bank transfers are only supported in NGN",
+      );
       error.statusCode = 400;
       throw error;
     }
@@ -346,10 +373,14 @@ const externalBankTransfer = async ({
       userAgent,
       metadata: {
         flowType,
-        bankName: bank?.name || null,
+        bankName: lookup.raw?.data?.bank_name || null,
       },
     });
-    addAudit(withdrawal, "pending", "External transfer created and awaiting provider");
+    addAudit(
+      withdrawal,
+      "pending",
+      "External transfer created and awaiting provider",
+    );
 
     transaction = new Transaction({
       senderId: user._id,
@@ -374,11 +405,15 @@ const externalBankTransfer = async ({
           accountName: lookup.accountName,
           accountNumber,
           bankCode,
-          bankName: bank?.name || null,
+          bankName: lookup.raw?.data?.bank_name || null,
         },
       },
     });
-    addAudit(transaction, "pending", "Wallet debit reserved for external transfer");
+    addAudit(
+      transaction,
+      "pending",
+      "Wallet debit reserved for external transfer",
+    );
 
     await withdrawal.save({ session });
     await transaction.save({ session });
@@ -388,7 +423,9 @@ const externalBankTransfer = async ({
   } catch (error) {
     await session.abortTransaction();
     if (error.code === 11000) {
-      const duplicate = await WithdrawalPayment.findOne({ idempotencyKey: stableKey });
+      const duplicate = await WithdrawalPayment.findOne({
+        idempotencyKey: stableKey,
+      });
       if (duplicate) {
         const duplicateTransaction = await Transaction.findOne({
           "metadata.transactionRef": duplicate.transactionRef,
@@ -415,11 +452,19 @@ const externalBankTransfer = async ({
       description: description || "Wallet withdrawal",
     });
 
-    const finalized = await finalizePayout({ withdrawal, transaction, payoutResult });
+    const finalized = await finalizePayout({
+      withdrawal,
+      transaction,
+      payoutResult,
+    });
     return { ...finalized, repeated: false };
   } catch (error) {
     if (error.retryable) {
-      const pending = await markPayoutRetryable({ withdrawal, transaction, error });
+      const pending = await markPayoutRetryable({
+        withdrawal,
+        transaction,
+        error,
+      });
       return { ...pending, repeated: false, retryRequired: true };
     }
 
@@ -448,7 +493,9 @@ const verifyExternalTransferStatus = async (transactionRef) => {
     "metadata.transactionRef": transactionRef,
   });
 
-  if (["success", "successful", "failed", "reversed"].includes(withdrawal.status)) {
+  if (
+    ["success", "successful", "failed", "reversed"].includes(withdrawal.status)
+  ) {
     return { withdrawal, transaction };
   }
 
