@@ -551,9 +551,9 @@ const setTransactionPin = async (req, res) => {
       });
     }
 
-    if (transactionPin.length < 4 || transactionPin.length > 6) {
+    if (!/^\d{4}$/.test(transactionPin)) {
       return res.status(400).json({
-        message: "Transaction PIN must be between 4 and 6 digits",
+        message: "Transaction PIN must be exactly 4 digits",
       });
     }
 
