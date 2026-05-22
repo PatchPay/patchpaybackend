@@ -563,6 +563,7 @@ const setTransactionPin = async (req, res) => {
     }
 
     user.transactionPinHash = await bcrypt.hash(transactionPin, 10);
+    user.hasTransactionPin = true;
     await user.save();
 
     res.status(200).json({

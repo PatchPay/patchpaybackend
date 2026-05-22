@@ -3,7 +3,6 @@ const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const User = require("../models/User");
 const mongoose = require("mongoose");
-const payoutService = require("../services/payoutService");
 const bankService = require("../services/bankService");
 const squadApi = require("../utils/squadApiUtils");
 const transferService = require("../services/transfer.service");
@@ -116,7 +115,7 @@ exports.verifyWithdrawal = async (req, res) => {
 exports.webhookHandler = async (req, res) => {
   try {
     const event = req.body;
-    const result = await payoutService.processWithdrawalWebhook(event);
+    const result = await transferService.processExternalTransferWebhook(event);
 
     if (result.alreadyProcessed) {
       return res.status(200).json({
