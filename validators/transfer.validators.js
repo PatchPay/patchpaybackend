@@ -9,12 +9,8 @@ const parseAmount = (value) => {
 };
 
 const validateAccountLookup = (body = {}) => {
-  const bankCode = String(body.bankCode || "").trim();
+  const bankCode = String(body.bankCode || body.bank_code || "").trim();
   const accountNumber = String(body.accountNumber || "").trim();
-
-  if (!bankCode) {
-    return { error: "bankCode is required" };
-  }
 
   if (!ACCOUNT_NUMBER_PATTERN.test(accountNumber)) {
     return { error: "accountNumber must be exactly 10 digits" };
@@ -58,6 +54,10 @@ const validateInternalTransfer = (body = {}) => {
 const validateExternalTransfer = (body = {}) => {
   const lookup = validateAccountLookup(body);
   if (lookup.error) return lookup;
+
+  if (!lookup.value.bankCode) {
+    return { error: "bankCode is required" };
+  }
 
   const amount = parseAmount(body.amount);
   const transactionPin = String(body.transactionPin || "").trim();

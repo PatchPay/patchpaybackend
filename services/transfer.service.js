@@ -15,6 +15,22 @@ const SQUAD_MERCHANT_ID = process.env.SQUAD_MERCHANT_ID || "MERCHANT";
 
 const getIdempotencyKey = (key) => String(key || "").trim();
 
+const getUserDisplayName = (user) => {
+  if (!user) return "";
+  if (user.accountType === "Personal") {
+    return `${user.firstName || ""} ${user.middleName || ""} ${user.surname || ""}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return (
+    user.businessName ||
+    user.organizationName ||
+    user.departmentName ||
+    user.email ||
+    ""
+  );
+};
+
 const requireIdempotencyKey = (key) => {
   const idempotencyKey = getIdempotencyKey(key);
   if (!idempotencyKey) {
@@ -77,6 +93,34 @@ const mapWithdrawalStatus = (status) => {
 };
 
 const accountLookup = async ({ bankCode, accountNumber }) => {
+  if (!bankCode) {
+    const wallet = await walletService.getActiveWalletByAccountNumber(
+      accountNumber,
+    );
+    if (!wallet) {
+      const error = new Error("Recipient account not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const user = await User.findById(wallet.userId);
+    if (!user) {
+      const error = new Error("Recipient user not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    return {
+      accountName: getUserDisplayName(user),
+      accountNumber: wallet.accountNumber,
+      bankCode: null,
+      currency: wallet.currency,
+      accountType: user.accountType,
+      internal: true,
+      verified: true,
+    };
+  }
+
   return squadService.lookupAccount({
     bankCode,
     accountNumber,
@@ -106,7 +150,12 @@ const internalTransfer = async ({
     idempotencyKey: stableKey,
   });
   if (existing) {
-    return { transaction: existing, repeated: true };
+    const senderWallet = await walletService.getActiveWalletForUser(user._id);
+    return {
+      transaction: existing,
+      senderBalance: senderWallet?.balance,
+      repeated: true,
+    };
   }
 
   const session = await mongoose.startSession();
@@ -170,6 +219,10 @@ const internalTransfer = async ({
       session,
     });
 
+    const sharedReference = generateUPRN(user._id, "transfer");
+    const senderName = getUserDisplayName(user);
+    const recipientName = getUserDisplayName(recipientUser);
+
     const transaction = new Transaction({
       type: "transfer",
       amount,
@@ -179,26 +232,63 @@ const internalTransfer = async ({
       status: "success",
       senderWallet: senderWallet._id,
       senderId: user._id,
-      recipientWallet: recipientWallet._id,
-      recipientId: recipientWallet.userId,
-      reference: generateUPRN(user._id, "transfer"),
+      reference: `${sharedReference}-DR`,
       idempotencyKey: stableKey,
       isUserAccountTransfer: true,
       description: description || "Wallet transfer",
       paymentMethod: "wallet",
       paymentGateway: feeDetails.paymentGateway || "Internal",
       metadata: {
+        sharedReference,
+        transferRole: "debit",
         recipientAccount,
+        recipientId: recipientWallet.userId,
+        recipientWallet: recipientWallet._id,
+        recipientName,
+        senderName,
         feeDetails,
       },
     });
     addAudit(transaction, "success", "Internal transfer completed");
 
+    const receiverTransaction = new Transaction({
+      type: "transfer",
+      amount,
+      fee: 0,
+      total: amount,
+      currency: recipientWallet.currency,
+      status: "success",
+      recipientWallet: recipientWallet._id,
+      recipientId: recipientWallet.userId,
+      reference: `${sharedReference}-CR`,
+      idempotencyKey: `${stableKey}:credit`,
+      isUserAccountTransfer: true,
+      description: description || "Wallet transfer received",
+      paymentMethod: "wallet",
+      paymentGateway: feeDetails.paymentGateway || "Internal",
+      metadata: {
+        sharedReference,
+        transferRole: "credit",
+        senderId: user._id,
+        senderWallet: senderWallet._id,
+        senderAccount: senderWallet.accountNumber,
+        senderName,
+        recipientName,
+      },
+    });
+    addAudit(
+      receiverTransaction,
+      "success",
+      "Internal transfer credit completed",
+    );
+
     await transaction.save({ session });
+    await receiverTransaction.save({ session });
     await session.commitTransaction();
 
     return {
       transaction,
+      receiverTransaction,
       senderBalance: debitedWallet.balance,
       repeated: false,
     };
@@ -228,17 +318,23 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
     withdrawal.providerResponses.push(payoutResult.raw);
     addAudit(withdrawal, status, "SquadCo payout response received");
 
-    transaction.status = mapTransactionStatus(payoutResult.status);
-    transaction.externalReference = payoutResult.providerReference;
-    transaction.providerReference = payoutResult.providerReference;
-    transaction.providerResponses.push(payoutResult.raw);
-    addAudit(
-      transaction,
-      transaction.status,
-      "Transfer status updated from SquadCo",
-    );
+    if (transaction) {
+      transaction.status = mapTransactionStatus(payoutResult.status);
+      transaction.externalReference = payoutResult.providerReference;
+      transaction.providerReference = payoutResult.providerReference;
+      transaction.providerResponses.push(payoutResult.raw);
+      addAudit(
+        transaction,
+        transaction.status,
+        "Transfer status updated from SquadCo",
+      );
+    }
 
-    if (["failed", "reversed"].includes(status) && !withdrawal.refunded) {
+    if (
+      transaction &&
+      ["failed", "reversed"].includes(status) &&
+      !withdrawal.refunded
+    ) {
       await walletService.creditWallet({
         walletId: transaction.senderWallet,
         amount: transaction.total,
@@ -259,7 +355,7 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
     }
 
     await withdrawal.save({ session });
-    await transaction.save({ session });
+    if (transaction) await transaction.save({ session });
     await session.commitTransaction();
     return { withdrawal, transaction };
   } catch (error) {
@@ -503,9 +599,61 @@ const verifyExternalTransferStatus = async (transactionRef) => {
   return finalizePayout({ withdrawal, transaction, payoutResult });
 };
 
+const processExternalTransferWebhook = async (event) => {
+  const data = event.Body || event.body || event.data || event;
+  const transactionRef =
+    data.transaction_reference ||
+    data.transaction_ref ||
+    data.reference ||
+    event.TransactionRef;
+
+  if (!transactionRef) {
+    const error = new Error("Invalid webhook payload");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const withdrawal = await WithdrawalPayment.findOne({ transactionRef });
+  if (!withdrawal) {
+    const error = new Error("Transfer not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const transaction = await Transaction.findOne({
+    "metadata.transactionRef": transactionRef,
+  });
+
+  if (
+    ["success", "successful", "failed", "reversed"].includes(
+      withdrawal.status,
+    )
+  ) {
+    return { withdrawal, transaction, alreadyProcessed: true };
+  }
+
+  const payoutResult = {
+    status: squadService.normalizePayoutStatus(data.status || event.status),
+    providerReference:
+      data.nip_transaction_reference ||
+      data.transaction_reference ||
+      data.reference ||
+      null,
+    raw: event,
+  };
+
+  const result = await finalizePayout({
+    withdrawal,
+    transaction,
+    payoutResult,
+  });
+  return { ...result, alreadyProcessed: false };
+};
+
 module.exports = {
   accountLookup,
   externalBankTransfer,
   internalTransfer,
+  processExternalTransferWebhook,
   verifyExternalTransferStatus,
 };
