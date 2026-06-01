@@ -94,9 +94,8 @@ const mapWithdrawalStatus = (status) => {
 
 const accountLookup = async ({ bankCode, accountNumber }) => {
   if (!bankCode) {
-    const wallet = await walletService.getActiveWalletByAccountNumber(
-      accountNumber,
-    );
+    const wallet =
+      await walletService.getActiveWalletByAccountNumber(accountNumber);
     if (!wallet) {
       const error = new Error("Recipient account not found");
       error.statusCode = 404;
@@ -625,9 +624,7 @@ const processExternalTransferWebhook = async (event) => {
   });
 
   if (
-    ["success", "successful", "failed", "reversed"].includes(
-      withdrawal.status,
-    )
+    ["success", "successful", "failed", "reversed"].includes(withdrawal.status)
   ) {
     return { withdrawal, transaction, alreadyProcessed: true };
   }

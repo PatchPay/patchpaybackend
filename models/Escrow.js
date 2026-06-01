@@ -79,8 +79,8 @@ const escrowSchema = new mongoose.Schema({
   
   // Additional metadata
   metadata: {
-    quote_id: String,
-    quote_number: String
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
   },
   
   createdAt: {

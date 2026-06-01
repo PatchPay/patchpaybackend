@@ -135,6 +135,10 @@ const quoteSchema = new Schema({
   deletionNotificationSent: {
     type: Boolean,
     default: false
+  },
+  invoice: {
+    type: Schema.Types.ObjectId,
+    ref: 'Invoice'
   }
 }, {
   timestamps: true
