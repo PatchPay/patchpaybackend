@@ -18,20 +18,29 @@ const sendError = (res, error) => {
     message: error.message || "Request failed",
   });
 };
+const initiateTransferPayment = async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const user = req.user;
 
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid amount is required",
+      });
+    }
 
+    const transactionRef = `TRF_${Date.now()}`;
 
-  // Create Squad payment session
     const squadApiUrl =
       process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
+
     const squadSecretKey = process.env.SQUAD_SECRET_KEY;
 
     console.log("FINAL URL:", `${squadApiUrl}/transaction/initiate`);
 
     console.log("SQUAD SECRET KEY:", squadSecretKey);
     console.log("SQUAD API URL:", squadApiUrl);
-
-    console.log("KEY BEING SENT:", squadSecretKey);
 
     if (!squadSecretKey) {
       return res.status(500).json({
@@ -40,91 +49,70 @@ const sendError = (res, error) => {
       });
     }
 
-    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/payments/transfer/callback`;
+    const callbackUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:8081"
+    }/api/payments/transfer/callback`;
 
     const payload = {
-      amount: Number(amount) * 100, // Amount in kobo
+      amount: Number(amount) * 100,
       email: user.email,
       currency: "NGN",
       initiate_type: "inline",
       transaction_ref: transactionRef,
       callback_url: callbackUrl,
-      // customer: {
-      //   name: `${user.firstName} ${user.surname || ""}`,
-      //   email: user.email,
-      //   phone: user.phoneNumber,
-      // },
       metadata: {
         userId: user._id.toString(),
         paymentType: "transfer",
       },
     };
 
-    try {
-      const response = await axios.post(
-        `${squadApiUrl}/transaction/initiate`,
-
-        payload,
-
-        {
-          headers: {
-            Authorization: `Bearer ${squadSecretKey}`,
-            "Content-Type": "application/json",
-          },
+    const response = await axios.post(
+      `${squadApiUrl}/transaction/initiate`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${squadSecretKey}`,
+          "Content-Type": "application/json",
         },
-      );
+      },
+    );
 
-      if (response.data && response.data.status === 200) {
-        // Update payment with checkout URL
-        payment.gatewayResponse = response.data;
-        await payment.save();
-
-        return res.status(200).json({
-          success: true,
-          message: "transfer initiated successfully",
-          data: {
-            checkoutUrl: response.data.data.checkout_url,
-            transactionRef,
-            amount,
-          },
-        });
-      } else {
-        // Payment failed to initialize
-        payment.status = "failed";
-        payment.errorMessage = "Failed to initialize payment with gateway";
-        payment.gatewayResponse = response.data;
-        await payment.save();
-
-        return res.status(400).json({
-          success: false,
-          message: "Failed to initialize payment",
-          error: response.data.message || "Payment gateway error",
-        });
-      }
-    } catch (error) {
-      console.log("FULL ERROR:", error.response?.data);
-      console.log("STATUS:", error.response?.status);
-      console.log(error.response?.status);
-      console.log(error.response?.data);
-
-      payment.status = "failed";
-      await payment.save();
-
-      return res.status(500).json({
-        success: false,
-        message: "Payment gateway error",
-        error: error.response?.data || error.message,
+    if (
+      response.data &&
+      (response.data.status === 200 || response.data.success === true)
+    ) {
+      return res.status(200).json({
+        success: true,
+        message: "Transfer payment initiated successfully",
+        data: {
+          checkoutUrl: response.data.data?.checkout_url,
+          transactionRef,
+          amount,
+          gatewayResponse: response.data,
+        },
       });
     }
+
+    return res.status(400).json({
+      success: false,
+      message: "Failed to initialize payment",
+      error: response.data?.message,
+    });
   } catch (error) {
-    console.error("transfer initiation error:", error);
+    console.error(
+      "Transfer payment initiation error:",
+      error.response?.data || error.message,
+    );
+
     return res.status(500).json({
       success: false,
-      message: "Server error",
-      error: error.message,
+      message: "Payment gateway error",
+      error: error.response?.data || error.message,
     });
   }
 };
+
+// Create Squad payment session
 
 const accountLookup = async (req, res) => {
   const validation = validateAccountLookup(req.body);
@@ -251,7 +239,8 @@ const verifyExternalTransfer = async (req, res) => {
   }
 
   try {
-    const result = await transferService.verifyExternalTransferStatus(transactionRef);
+    const result =
+      await transferService.verifyExternalTransferStatus(transactionRef);
     return res.status(200).json({
       success: true,
       data: {
@@ -291,5 +280,6 @@ module.exports = {
   getBanks,
   internalTransfer,
   verifyExternalTransfer,
+  initiateTransferPayment,
   withdrawal,
 };
