@@ -32,6 +32,7 @@ router.put("/quotes/:quoteId/cancel", authenticateToken, cancelQuote);
 
 // Accept quote
 router.put("/quotes/:quoteId/accept", authenticateToken, acceptQuote);
+router.post("/:quoteId/accept", authenticateToken, acceptQuote);
 
 // Reject quote
 router.put("/quotes/:quoteId/reject", authenticateToken, rejectQuote);

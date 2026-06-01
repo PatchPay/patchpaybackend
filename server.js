@@ -15,6 +15,7 @@ const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
 const transferRoutes = require("./routes/transferRoutes");
+const invoiceRoutes = require("./routes/invoiceRoutes");
 
 // Import Cron Jobs
 const startQuoteNotificationCron = require("./cron/quoteNotifications");
@@ -83,6 +84,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rfq", rfqRoutes);
+app.use("/api/rfqs", rfqRoutes);
+app.use("/api/invoices", invoiceRoutes);
 app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);
 app.use("/api/notifications", notificationRoutes);
@@ -115,6 +118,8 @@ app.get("/api", (req, res) => {
       wallet: "/api/wallet",
       payments: "/api/payments",
       rfq: "/api/rfq",
+      rfqs: "/api/rfqs",
+      invoices: "/api/invoices",
       escrow: "/api/escrow",
       escrowTransactions: "/api/escrow-transactions",
       notifications: "/api/notifications",

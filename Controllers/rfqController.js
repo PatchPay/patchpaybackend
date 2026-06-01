@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const Notification = require("../models/Notification");
+const { createInvoiceFromQuote } = require("./invoiceController");
 
 // Set up nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -528,6 +529,8 @@ const acceptQuote = async (req, res) => {
     quote.status = "Accepted";
     await quote.save();
 
+    const invoice = await createInvoiceFromQuote(quote);
+
     // Create quote history entry
     const quoteHistory = new QuoteHistory({
       quote: quote._id,
@@ -585,7 +588,10 @@ const acceptQuote = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Quote accepted successfully",
-      data: quote,
+      data: {
+        quote,
+        invoice,
+      },
     });
   } catch (error) {
     console.error("Error in acceptQuote:", error);

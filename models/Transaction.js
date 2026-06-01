@@ -2,10 +2,16 @@ const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema(
   {
-    // Transaction type (transfer, deposit, withdrawal)
+    // Transaction type
     type: {
       type: String,
-      enum: ["transfer", "deposit", "withdrawal"],
+      enum: [
+        "transfer",
+        "deposit",
+        "withdrawal",
+        "invoice_payment",
+        "escrow_funding",
+      ],
       required: true,
     },
 

@@ -61,6 +61,69 @@ const normalizePayoutStatus = (status) => {
   return "processing";
 };
 
+const normalizeCollectionStatus = (status) => {
+  const value = String(status || "").toLowerCase();
+  if (["successful", "success", "completed", "approved"].includes(value)) {
+    return "success";
+  }
+  if (["failed", "failure", "declined", "rejected"].includes(value)) {
+    return "failed";
+  }
+  return "pending";
+};
+
+const initiateCollection = async ({
+  amount,
+  email,
+  currency = "NGN",
+  transactionRef,
+  callbackUrl,
+  metadata = {},
+}) => {
+  const response = await request("post", "/transaction/initiate", {
+    amount: Number(amount) * 100,
+    email,
+    currency,
+    initiate_type: "inline",
+    transaction_ref: transactionRef,
+    callback_url: callbackUrl,
+    metadata,
+  });
+
+  return {
+    raw: response,
+    checkoutUrl: response?.data?.checkout_url,
+    transactionRef,
+  };
+};
+
+const verifyCollection = async (transactionRef) => {
+  const response = await request("get", `/transaction/verify/${transactionRef}`);
+  const data = response?.data || {};
+
+  return {
+    raw: response,
+    status: normalizeCollectionStatus(data.status),
+    amount:
+      data.amount ||
+      data.transaction_amount ||
+      data.charged_amount ||
+      data.principal_amount,
+    currency: data.currency || "NGN",
+    transactionRef:
+      data.transaction_ref ||
+      data.transaction_reference ||
+      data.reference ||
+      transactionRef,
+    providerReference:
+      data.gateway_ref ||
+      data.gateway_reference ||
+      data.transaction_ref ||
+      data.reference ||
+      null,
+  };
+};
+
 const lookupAccount = async ({ bankCode, accountNumber }) => {
   const response = await request("post", "/payout/account/lookup", {
     bank_code: bankCode,
@@ -143,8 +206,11 @@ const getBanks = async () => {
 
 module.exports = {
   getBanks,
+  initiateCollection,
   initiatePayout,
   lookupAccount,
+  normalizeCollectionStatus,
   normalizePayoutStatus,
   requeryPayout,
+  verifyCollection,
 };
