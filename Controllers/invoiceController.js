@@ -11,18 +11,36 @@ const { generateUPRN } = require("../utils/paymentUtils");
 const createInvoiceFromQuote = async (quote, session = null) => {
   const requesterId = quote.user?._id || quote.user;
   const recipientId = quote.destinatary_user?._id || quote.destinatary_user;
+  console.log("STEP: before Invoice.findOne createInvoiceFromQuote", {
+    quoteId: quote._id,
+  });
   const existingInvoice = await Invoice.findOne({ rfqId: quote._id }).session(
     session,
   );
+  console.log("STEP: after Invoice.findOne createInvoiceFromQuote", {
+    quoteId: quote._id,
+    invoiceFound: !!existingInvoice,
+  });
 
   if (existingInvoice) {
     if (!quote.invoice) {
       quote.invoice = existingInvoice._id;
+      console.log("STEP: before quote.save existing invoice createInvoiceFromQuote", {
+        quoteId: quote._id,
+        invoiceId: existingInvoice._id,
+      });
       await quote.save({ session });
+      console.log("STEP: after quote.save existing invoice createInvoiceFromQuote", {
+        quoteId: quote._id,
+        invoiceId: existingInvoice._id,
+      });
     }
     return existingInvoice;
   }
 
+  console.log("STEP: before Invoice.create createInvoiceFromQuote", {
+    quoteId: quote._id,
+  });
   const [invoice] = await Invoice.create(
     [
       {
@@ -42,9 +60,21 @@ const createInvoiceFromQuote = async (quote, session = null) => {
     ],
     { session },
   );
+  console.log("STEP: after Invoice.create createInvoiceFromQuote", {
+    quoteId: quote._id,
+    invoiceId: invoice?._id,
+  });
 
   quote.invoice = invoice._id;
+  console.log("STEP: before quote.save new invoice createInvoiceFromQuote", {
+    quoteId: quote._id,
+    invoiceId: invoice._id,
+  });
   await quote.save({ session });
+  console.log("STEP: after quote.save new invoice createInvoiceFromQuote", {
+    quoteId: quote._id,
+    invoiceId: invoice._id,
+  });
 
   return invoice;
 };
