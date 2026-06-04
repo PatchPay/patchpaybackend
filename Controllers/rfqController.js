@@ -11,7 +11,6 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const Notification = require("../models/Notification");
-const { createInvoiceFromQuote } = require("./invoiceController");
 
 const runAfterResponse = (label, task) => {
   setImmediate(async () => {
@@ -563,10 +562,6 @@ const acceptQuote = async (req, res) => {
     console.log("STEP: after quote.save acceptQuote", { quoteId: quote._id });
 
     runAfterResponse("acceptQuote side effects", async () => {
-    console.log("STEP: before createInvoiceFromQuote", { quoteId: quote._id });
-    const invoice = await createInvoiceFromQuote(quote);
-    console.log("STEP: after createInvoiceFromQuote", { quoteId: quote._id, invoiceId: invoice?._id });
-
     // Create quote history entry
     const quoteHistory = new QuoteHistory({
       quote: quote._id,

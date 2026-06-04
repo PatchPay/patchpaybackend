@@ -8,16 +8,36 @@ const User = require("../models/User");
 const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
 
-const createInvoiceFromQuote = async (quote, session = null) => {
+const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
   const requesterId = quote.user?._id || quote.user;
   const recipientId = quote.destinatary_user?._id || quote.destinatary_user;
-  console.log("STEP: before Invoice.findOne createInvoiceFromQuote", {
+
+  if (!requesterId || !recipientId) {
+    const error = new Error("Quote is missing requester or recipient data");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!quote.product_description) {
+    const error = new Error("Quote is missing product description");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const amount = Number(quote.total || quote.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("Quote is missing a valid invoice amount");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  console.log("STEP: before Invoice.findOne createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
   });
   const existingInvoice = await Invoice.findOne({ rfqId: quote._id }).session(
     session,
   );
-  console.log("STEP: after Invoice.findOne createInvoiceFromQuote", {
+  console.log("STEP: after Invoice.findOne createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
     invoiceFound: !!existingInvoice,
   });
@@ -25,20 +45,23 @@ const createInvoiceFromQuote = async (quote, session = null) => {
   if (existingInvoice) {
     if (!quote.invoice) {
       quote.invoice = existingInvoice._id;
-      console.log("STEP: before quote.save existing invoice createInvoiceFromQuote", {
+      console.log("STEP: before quote.save existing invoice createInvoiceFromAcceptedQuote", {
         quoteId: quote._id,
         invoiceId: existingInvoice._id,
       });
       await quote.save({ session });
-      console.log("STEP: after quote.save existing invoice createInvoiceFromQuote", {
+      console.log("STEP: after quote.save existing invoice createInvoiceFromAcceptedQuote", {
         quoteId: quote._id,
         invoiceId: existingInvoice._id,
       });
     }
-    return existingInvoice;
+    const error = new Error("Invoice already exists for this quote");
+    error.statusCode = 409;
+    error.invoice = existingInvoice;
+    throw error;
   }
 
-  console.log("STEP: before Invoice.create createInvoiceFromQuote", {
+  console.log("STEP: before Invoice.create createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
   });
   const [invoice] = await Invoice.create(
@@ -47,7 +70,7 @@ const createInvoiceFromQuote = async (quote, session = null) => {
         rfqId: quote._id,
         requesterId,
         recipientId,
-        amount: Number(quote.total || quote.amount),
+        amount,
         currency: quote.currency || "NGN",
         description: quote.product_description,
         status: "pending",
@@ -60,18 +83,18 @@ const createInvoiceFromQuote = async (quote, session = null) => {
     ],
     { session },
   );
-  console.log("STEP: after Invoice.create createInvoiceFromQuote", {
+  console.log("STEP: after Invoice.create createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
     invoiceId: invoice?._id,
   });
 
   quote.invoice = invoice._id;
-  console.log("STEP: before quote.save new invoice createInvoiceFromQuote", {
+  console.log("STEP: before quote.save new invoice createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
     invoiceId: invoice._id,
   });
   await quote.save({ session });
-  console.log("STEP: after quote.save new invoice createInvoiceFromQuote", {
+  console.log("STEP: after quote.save new invoice createInvoiceFromAcceptedQuote", {
     quoteId: quote._id,
     invoiceId: invoice._id,
   });
@@ -93,7 +116,65 @@ const amountsMatch = (providerAmount, invoiceAmount) => {
   );
 };
 
-exports.createInvoiceFromQuote = createInvoiceFromQuote;
+exports.createInvoiceFromAcceptedQuote = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(quoteId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid quote ID",
+      });
+    }
+
+    const quote = await Quote.findById(quoteId);
+    if (!quote) {
+      return res.status(404).json({
+        success: false,
+        message: "Quote not found",
+      });
+    }
+
+    if (
+      quote.user.toString() !== req.user._id.toString() &&
+      quote.destinatary_user.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to create an invoice for this quote",
+      });
+    }
+
+    if (quote.type !== "RFQ") {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice can only be created for an RFQ quote",
+      });
+    }
+
+    if (quote.status !== "Accepted") {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice can only be created for an accepted quote",
+      });
+    }
+
+    const invoice = await buildInvoiceFromAcceptedQuote(quote);
+
+    return res.status(201).json({
+      success: true,
+      message: "Invoice created successfully",
+      data: invoice,
+    });
+  } catch (error) {
+    console.error("Create invoice from accepted quote error:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to create invoice from accepted quote",
+      data: error.invoice ? { invoice: error.invoice } : undefined,
+    });
+  }
+};
 
 exports.initiateInvoicePayment = async (req, res) => {
   try {
