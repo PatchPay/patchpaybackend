@@ -4,7 +4,7 @@ const { authenticateToken } = require("../middlewares/authMiddleware");
 const invoiceController = require("../Controllers/invoiceController");
 
 router.post(
-  "/create-from-accepted-quote/:quoteId",
+  "/generate-invoice/:quoteId",
   authenticateToken,
   invoiceController.createInvoiceFromAcceptedQuote,
 );
