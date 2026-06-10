@@ -100,7 +100,7 @@ const quoteSchema = new Schema(
         type: String,
         required: true,
       },
-      lastName: {
+      surname: {
         type: String,
         required: true,
       },
