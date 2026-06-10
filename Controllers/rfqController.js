@@ -242,14 +242,14 @@ const createRFQ = async (req, res) => {
       user: {
         _id: sender._id,
         firstName: sender.firstName,
-        lastName: sender.lastName,
+        lastName: sender.surname,
         phoneNumber: sender.phoneNumber,
       },
 
       destinatary_user: {
         _id: recipient._id,
         firstName: recipient.firstName,
-        lastName: recipient.lastName,
+        lastName: recipient.surname,
         phoneNumber: recipient.phoneNumber,
       },
 
@@ -284,7 +284,7 @@ const createRFQ = async (req, res) => {
       user: {
         _id: recipient._id,
         firstName: recipient.firstName,
-        lastName: recipient.lastName,
+        surname: recipient.surname,
         phoneNumber: recipient.phoneNumber,
       },
       status: "Pending",
