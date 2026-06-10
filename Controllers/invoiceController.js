@@ -310,11 +310,18 @@ exports.verifyInvoicePayment = async (req, res) => {
     console.log("================================");
     invoice.gatewayResponse = verification.raw;
     console.log("verification.status =", verification.status);
+    console.log("verification.raw?.status =", verification.raw?.status);
+    console.log("verification.raw?.data?.status =", verification.raw?.data?.status);
     console.log(
       "verification.raw?.data?.transaction_status =",
       verification.raw?.data?.transaction_status,
     );
-    if (verification.status !== "success") {
+    const isSuccessfulPayment =
+      verification.raw?.status === 200 &&
+      verification.raw?.data?.status === "success" &&
+      verification.raw?.data?.transaction_status === "success";
+
+    if (!isSuccessfulPayment) {
       invoice.paymentStatus = "failed";
       await invoice.save();
 
