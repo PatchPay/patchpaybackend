@@ -304,8 +304,16 @@ exports.verifyInvoicePayment = async (req, res) => {
     }
 
     const verification = await squadService.verifyCollection(transactionRef);
+    console.log("================================");
+    console.log("VERIFICATION RESPONSE");
+    console.log(JSON.stringify(verification, null, 2));
+    console.log("================================");
     invoice.gatewayResponse = verification.raw;
-
+    console.log("verification.status =", verification.status);
+    console.log(
+      "verification.raw?.data?.transaction_status =",
+      verification.raw?.data?.transaction_status,
+    );
     if (verification.status !== "success") {
       invoice.paymentStatus = "failed";
       await invoice.save();
@@ -316,6 +324,12 @@ exports.verifyInvoicePayment = async (req, res) => {
         data: verification.raw,
       });
     }
+    console.log("Invoice Amount:", invoice.amount);
+    console.log("Verification Amount:", verification.amount);
+    console.log(
+      "Amounts Match:",
+      amountsMatch(verification.amount, invoice.amount),
+    );
 
     if (!amountsMatch(verification.amount, invoice.amount)) {
       invoice.paymentStatus = "failed";
