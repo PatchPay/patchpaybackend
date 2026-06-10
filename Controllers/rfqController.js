@@ -102,7 +102,7 @@ const searchUser = async (req, res) => {
         break;
       case "name":
         user = await User.findOne({
-          $or: [{ firstName: query }, { lastName: query }],
+          $or: [{ firstName: query }, { surname: query }],
         }).select(requiredFields);
         break;
       default:
@@ -175,6 +175,12 @@ const createRFQ = async (req, res) => {
       });
     }
 
+    console.log("Sender User:", sender);
+    console.log("Recipient User:", recipient);
+
+    console.log("Sender surname:", sender?.surname);
+    console.log("Recipient surname:", recipient?.surname);
+
     // =========================
     // Currency handling
     // =========================
@@ -242,14 +248,14 @@ const createRFQ = async (req, res) => {
       user: {
         _id: sender._id,
         firstName: sender.firstName,
-        lastName: sender.surname,
+        surname: sender.surname,
         phoneNumber: sender.phoneNumber,
       },
 
       destinatary_user: {
         _id: recipient._id,
         firstName: recipient.firstName,
-        lastName: recipient.surname,
+        surname: recipient.surname,
         phoneNumber: recipient.phoneNumber,
       },
 
@@ -308,7 +314,7 @@ const createRFQ = async (req, res) => {
         quoteNumber,
         amount: numericAmount,
         currency: selectedCurrency,
-        recipientName: `${recipient.firstName} ${recipient.lastName}`,
+        recipientName: `${recipient.firstName} ${recipient.surname}`,
       },
     }).save();
 
@@ -316,7 +322,7 @@ const createRFQ = async (req, res) => {
       recipientId: recipientId,
       senderId: sender._id,
       title: "New RFQ Received",
-      message: `You have received RFQ #${quoteNumber} from ${sender.firstName} ${sender.lastName}`,
+      message: `You have received RFQ #${quoteNumber} from ${sender.firstName} ${sender.surname}`,
       type: "info",
       category: "system",
       metadata: {
@@ -324,7 +330,7 @@ const createRFQ = async (req, res) => {
         quoteNumber,
         amount: numericAmount,
         currency: selectedCurrency,
-        senderName: `${sender.firstName} ${sender.lastName}`,
+        senderName: `${sender.firstName} ${sender.surname}`,
       },
     }).save();
 
@@ -416,11 +422,11 @@ const getQuotes = async (req, res) => {
     })
       .populate(
         "user",
-        "firstName lastName organization email phoneNumber uniqueId address",
+        "firstName surname organization email phoneNumber uniqueId address",
       )
       .populate(
         "destinatary_user",
-        "firstName lastName organization email phoneNumber uniqueId address",
+        "firstName surname organization email phoneNumber uniqueId address",
       )
       .sort({ createdAt: -1 });
 
@@ -446,8 +452,8 @@ const cancelQuote = async (req, res) => {
     // Find the quote and populate user details
     console.log("STEP: before Quote.findById cancelQuote", { quoteId });
     const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName lastName email")
-      .populate("destinatary_user", "firstName lastName email");
+      .populate("user", "firstName surname email")
+      .populate("destinatary_user", "firstName surname email");
     console.log("STEP: after Quote.findById cancelQuote", {
       quoteFound: !!quote,
     });
@@ -526,13 +532,13 @@ const cancelQuote = async (req, res) => {
         recipientId: quote.destinatary_user._id,
         senderId: userId,
         title: "RFQ Cancelled",
-        message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user.firstName} ${quote.user.lastName}`,
+        message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user.firstName} ${quote.user.surname}`,
         type: "warning",
         category: "system",
         metadata: {
           quoteId: quote._id,
           quoteNumber: quote.quote_number,
-          senderName: `${quote.user.firstName} ${quote.user.lastName}`,
+          senderName: `${quote.user.firstName} ${quote.user.surname}`,
         },
       });
       console.log("STEP: before recipientNotification.save cancelQuote", {
@@ -588,8 +594,8 @@ const acceptQuote = async (req, res) => {
     // Find the quote and populate user details
     console.log("STEP: before Quote.findById acceptQuote", { quoteId });
     const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName lastName email")
-      .populate("destinatary_user", "firstName lastName email");
+      .populate("user", "firstName surname email")
+      .populate("destinatary_user", "firstName surname email");
     console.log("STEP: after Quote.findById acceptQuote", {
       quoteFound: !!quote,
     });
@@ -653,13 +659,13 @@ const acceptQuote = async (req, res) => {
         recipientId: quote.user._id,
         senderId: userId,
         title: "RFQ Accepted",
-        message: `Your RFQ #${quote.quote_number} has been accepted by ${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`,
+        message: `Your RFQ #${quote.quote_number} has been accepted by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
         type: "success",
         category: "system",
         metadata: {
           quoteId: quote._id,
           quoteNumber: quote.quote_number,
-          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`,
+          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
         },
       });
       console.log("STEP: before issuerNotification.save acceptQuote", {
@@ -750,8 +756,8 @@ const rejectQuote = async (req, res) => {
     // Find the quote and populate user details
     console.log("STEP: before Quote.findById rejectQuote", { quoteId });
     const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName lastName email")
-      .populate("destinatary_user", "firstName lastName email");
+      .populate("user", "firstName surname email")
+      .populate("destinatary_user", "firstName surname email");
     console.log("STEP: after Quote.findById rejectQuote", {
       quoteFound: !!quote,
     });
@@ -810,13 +816,13 @@ const rejectQuote = async (req, res) => {
         recipientId: quote.user._id,
         senderId: userId,
         title: "RFQ Rejected",
-        message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}${reason ? ". Reason: " + reason : ""}`,
+        message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}${reason ? ". Reason: " + reason : ""}`,
         type: "error",
         category: "system",
         metadata: {
           quoteId: quote._id,
           quoteNumber: quote.quote_number,
-          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.lastName}`,
+          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
           reason,
         },
       });
@@ -922,7 +928,7 @@ const checkQuoteNotifications = async () => {
           metadata: {
             quoteId: quote._id,
             quoteNumber: quote.quote_number,
-            senderName: `${quote.user.firstName} ${quote.user.lastName}`,
+            senderName: `${quote.user.firstName} ${quote.user.surname}`,
           },
         });
         await reminderNotification.save();
@@ -1021,11 +1027,11 @@ const getQuoteById = async (req, res) => {
     const quote = await Quote.findById(quoteId)
       .populate(
         "user",
-        "firstName lastName organization email phoneNumber uniqueId address",
+        "firstName surname organization email phoneNumber uniqueId address",
       )
       .populate(
         "destinatary_user",
-        "firstName lastName organization email phoneNumber uniqueId address",
+        "firstName surname organization email phoneNumber uniqueId address",
       );
 
     if (!quote) {
