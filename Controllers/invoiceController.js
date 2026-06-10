@@ -45,15 +45,21 @@ const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
   if (existingInvoice) {
     if (!quote.invoice) {
       quote.invoice = existingInvoice._id;
-      console.log("STEP: before quote.save existing invoice createInvoiceFromAcceptedQuote", {
-        quoteId: quote._id,
-        invoiceId: existingInvoice._id,
-      });
+      console.log(
+        "STEP: before quote.save existing invoice createInvoiceFromAcceptedQuote",
+        {
+          quoteId: quote._id,
+          invoiceId: existingInvoice._id,
+        },
+      );
       await quote.save({ session });
-      console.log("STEP: after quote.save existing invoice createInvoiceFromAcceptedQuote", {
-        quoteId: quote._id,
-        invoiceId: existingInvoice._id,
-      });
+      console.log(
+        "STEP: after quote.save existing invoice createInvoiceFromAcceptedQuote",
+        {
+          quoteId: quote._id,
+          invoiceId: existingInvoice._id,
+        },
+      );
     }
     const error = new Error("Invoice already exists for this quote");
     error.statusCode = 409;
@@ -89,15 +95,21 @@ const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
   });
 
   quote.invoice = invoice._id;
-  console.log("STEP: before quote.save new invoice createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
-    invoiceId: invoice._id,
-  });
+  console.log(
+    "STEP: before quote.save new invoice createInvoiceFromAcceptedQuote",
+    {
+      quoteId: quote._id,
+      invoiceId: invoice._id,
+    },
+  );
   await quote.save({ session });
-  console.log("STEP: after quote.save new invoice createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
-    invoiceId: invoice._id,
-  });
+  console.log(
+    "STEP: after quote.save new invoice createInvoiceFromAcceptedQuote",
+    {
+      quoteId: quote._id,
+      invoiceId: invoice._id,
+    },
+  );
 
   return invoice;
 };
@@ -128,6 +140,7 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
     }
 
     const quote = await Quote.findById(quoteId);
+
     if (!quote) {
       return res.status(404).json({
         success: false,
@@ -135,13 +148,21 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
       });
     }
 
-    if (
-      quote.user.toString() !== req.user._id.toString() &&
-      quote.destinatary_user.toString() !== req.user._id.toString()
-    ) {
+    const rfqCreatorId = quote.user?._id?.toString() || "";
+
+    const loggedInUserId = req.user._id.toString();
+
+    console.log("========== INVOICE CHECK ==========");
+    console.log("Logged In User:", loggedInUserId);
+    console.log("RFQ Creator:", rfqCreatorId);
+    console.log("Quote User Object:", quote.user);
+    console.log("===================================");
+
+    // Only RFQ creator can generate invoice
+    if (rfqCreatorId !== loggedInUserId) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to create an invoice for this quote",
+        message: "Only the RFQ creator can generate an invoice",
       });
     }
 
@@ -168,6 +189,7 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
     });
   } catch (error) {
     console.error("Create invoice from accepted quote error:", error);
+
     return res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Failed to create invoice from accepted quote",
@@ -175,7 +197,6 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
     });
   }
 };
-
 exports.initiateInvoicePayment = async (req, res) => {
   try {
     const { invoiceId } = req.params;
@@ -252,7 +273,9 @@ exports.initiateInvoicePayment = async (req, res) => {
 exports.verifyInvoicePayment = async (req, res) => {
   try {
     const transactionRef =
-      req.body.transactionRef || req.body.reference || req.body.paymentReference;
+      req.body.transactionRef ||
+      req.body.reference ||
+      req.body.paymentReference;
 
     if (!transactionRef) {
       return res.status(400).json({
@@ -308,7 +331,9 @@ exports.verifyInvoicePayment = async (req, res) => {
     session.startTransaction();
 
     try {
-      const lockedInvoice = await Invoice.findById(invoice._id).session(session);
+      const lockedInvoice = await Invoice.findById(invoice._id).session(
+        session,
+      );
       if (lockedInvoice.paymentStatus === "paid") {
         await session.commitTransaction();
         session.endSession();
@@ -430,7 +455,8 @@ exports.verifyInvoicePayment = async (req, res) => {
       lockedInvoice.verifiedAt = new Date();
       lockedInvoice.fundingTransactionId = invoiceTransaction._id;
       lockedInvoice.escrowFundingTransactionId =
-        escrowFundingTransaction?._id || lockedInvoice.escrowFundingTransactionId;
+        escrowFundingTransaction?._id ||
+        lockedInvoice.escrowFundingTransactionId;
       lockedInvoice.escrowId = escrow._id;
       lockedInvoice.gatewayResponse = verification.raw;
       await lockedInvoice.save({ session });
