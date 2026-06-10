@@ -74,7 +74,7 @@ const searchUser = async (req, res) => {
     let user;
     const requiredFields = {
       firstName: 1,
-      lastName: 1,
+      surname: 1,
       email: 1,
       phoneNumber: 1,
       accountType: 1,
