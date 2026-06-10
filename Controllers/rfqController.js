@@ -175,11 +175,11 @@ const createRFQ = async (req, res) => {
       });
     }
 
-    console.log("Sender User:", sender);
-    console.log("Recipient User:", recipient);
+    // console.log("Sender User:", sender);
+    // console.log("Recipient User:", recipient);
 
-    console.log("Sender surname:", sender?.surname);
-    console.log("Recipient surname:", recipient?.surname);
+    // console.log("Sender surname:", sender?.surname);
+    // console.log("Recipient surname:", recipient?.surname);
 
     // =========================
     // Currency handling
@@ -416,29 +416,28 @@ const getQuotes = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Find all quotes where the user is either the creator or recipient
-    const quotes = await Quote.find({
-      $or: [{ user: userId }, { destinatary_user: userId }],
-    })
-      .populate(
-        "user",
-        "firstName surname organization email phoneNumber uniqueId address",
-      )
-      .populate(
-        "destinatary_user",
-        "firstName surname organization email phoneNumber uniqueId address",
-      )
-      .sort({ createdAt: -1 });
+    console.log("Current User ID:", userId);
 
-    res.json({
+    const quotes = await Quote.find({
+      $or: [{ "user._id": userId }, { "destinatary_user._id": userId }],
+    }).sort({ createdAt: -1 });
+
+    console.log("Quotes Found:", quotes.length);
+
+    if (quotes.length > 0) {
+      console.log("First Quote:", JSON.stringify(quotes[0], null, 2));
+    }
+
+    return res.status(200).json({
       success: true,
       data: quotes,
     });
   } catch (error) {
     console.error("Error fetching quotes:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: "Failed to fetch quotes",
+      message: error.message || "Failed to fetch quotes",
     });
   }
 };
