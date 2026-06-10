@@ -175,11 +175,11 @@ const createRFQ = async (req, res) => {
       });
     }
 
-    console.log("Sender User:", sender);
-    console.log("Recipient User:", recipient);
+    // console.log("Sender User:", sender);
+    // console.log("Recipient User:", recipient);
 
-    console.log("Sender surname:", sender?.surname);
-    console.log("Recipient surname:", recipient?.surname);
+    // console.log("Sender surname:", sender?.surname);
+    // console.log("Recipient surname:", recipient?.surname);
 
     // =========================
     // Currency handling
