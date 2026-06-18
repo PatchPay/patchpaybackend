@@ -123,8 +123,18 @@ const quoteSchema = new Schema(
       enum: ["Domestic", "International"],
       required: true,
     },
+
     delivery_address: {
       type: deliveryAddressSchema,
+      required: true,
+    },
+    arrival_date: {
+      type: Date,
+      required: true,
+    },
+
+    arrival_time: {
+      type: String,
       required: true,
     },
     line_total: {

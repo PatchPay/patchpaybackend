@@ -151,6 +151,8 @@ const createRFQ = async (req, res) => {
       delivery_type,
       trade_type,
       delivery_address,
+      arrival_date,
+      arrival_time,
       delivery_charge,
       transaction_charges,
       subtotal,
@@ -164,6 +166,13 @@ const createRFQ = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Recipient not found",
+      });
+    }
+
+    if (!arrival_date || !arrival_time) {
+      return res.status(400).json({
+        success: false,
+        message: "Arrival date and arrival time are required",
       });
     }
 
@@ -261,10 +270,12 @@ const createRFQ = async (req, res) => {
 
       delivery_code:
         delivery_code || Math.floor(100000 + Math.random() * 900000),
-
       delivery_type,
       trade_type,
       delivery_address,
+
+      arrival_date,
+      arrival_time,
 
       line_total: numericAmount,
       delivery_charge: numericDelivery,
