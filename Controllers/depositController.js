@@ -56,7 +56,7 @@ exports.initiateDeposit = async (req, res) => {
       });
     }
 
-    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/payments/deposit/callback`;
+    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:5000"}/api/payments/deposit/callback`;
 
     const payload = {
       amount: Number(amount) * 100, // Amount in kobo
@@ -408,7 +408,7 @@ exports.verifyDeposit = async (req, res) => {
       if (
         response.data &&
         response.data.status === 200 &&
-        response.data.data.status === "success"
+        response.data.data.transaction_status === "success"
       ) {
         // Payment was successful
         payment.status = "successful";
@@ -487,7 +487,7 @@ exports.verifyDeposit = async (req, res) => {
           response.data.message || "Payment verification failed";
         // Don't use response.data.message if it's "Success" — that's misleading
         payment.errorMessage =
-          response.data.data?.status !== "success"
+          response.data.data?.transaction_status !== "success"
             ? response.data.message || "Payment verification failed"
             : "Wallet or transaction error after successful payment";
         await payment.save();
@@ -519,6 +519,149 @@ exports.verifyDeposit = async (req, res) => {
     });
   }
 };
+
+
+// exports.verifyDeposit = async (req, res) => {
+//   try {
+//     const { transactionRef } = req.body;
+
+//     // 👇 If opened in browser (no JSON body), show HTML UI
+//     if (!transactionRef && req.method === "GET") {
+//       return res.send(`
+//         <!DOCTYPE html>
+//         <html>
+//         <head>
+//           <title>Verify Deposit (Debug)</title>
+//           <style>
+//             body {
+//               font-family: Arial;
+//               max-width: 600px;
+//               margin: 50px auto;
+//               padding: 20px;
+//             }
+//             input {
+//               width: 100%;
+//               padding: 10px;
+//               margin-bottom: 10px;
+//             }
+//             button {
+//               padding: 10px 15px;
+//               cursor: pointer;
+//             }
+//             pre {
+//               background: #111;
+//               color: #0f0;
+//               padding: 15px;
+//               margin-top: 20px;
+//               overflow-x: auto;
+//             }
+//           </style>
+//         </head>
+//         <body>
+
+//           <h2>🔍 Deposit Verification Debug</h2>
+
+//           <input id="ref" placeholder="Enter Transaction Ref (PP-xxxx)" />
+
+//           <button onclick="verify()">Verify</button>
+
+//           <pre id="output">Result will appear here...</pre>
+
+//           <script>
+//             async function verify() {
+//               const transactionRef = document.getElementById("ref").value;
+
+//               const res = await fetch("/api/payments/deposit/verify", {
+//                 method: "POST",
+//                 headers: {
+//                   "Content-Type": "application/json"
+//                 },
+//                 body: JSON.stringify({ transactionRef })
+//               });
+
+//               const data = await res.json();
+//               document.getElementById("output").textContent =
+//                 JSON.stringify(data, null, 2);
+//             }
+//           </script>
+
+//         </body>
+//         </html>
+//       `);
+//     }
+
+//     // ❌ validation
+//     if (!transactionRef) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Transaction reference is required",
+//       });
+//     }
+
+//     // 🔍 Find payment
+//     const payment = await DepositPayment.findOne({ transactionRef });
+
+//     if (!payment) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Payment not found",
+//       });
+//     }
+
+//     if (payment.status === "successful") {
+//       return res.status(200).json({
+//         success: true,
+//         message: "Payment already verified",
+//         data: payment,
+//       });
+//     }
+
+//     // 👇 keep your existing Squad verification logic below
+//     const squadApiUrl =
+//       process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
+//     const squadSecretKey = process.env.SQUAD_SECRET_KEY;
+
+//     const response = await axios.get(
+//       `${squadApiUrl}/transaction/verify/${transactionRef}`,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${squadSecretKey}`,
+//         },
+//       }
+//     );
+
+//     payment.gatewayResponse = response.data;
+
+//     if (
+//       response.data &&
+//       response.data.status === 200 &&
+//       response.data.data.transaction_status === "success"
+//     ) {
+//       payment.status = "successful";
+//       await payment.save();
+
+//       return res.json({
+//         success: true,
+//         message: "Payment verified successfully",
+//         data: payment,
+//       });
+//     }
+
+//     return res.status(400).json({
+//       success: false,
+//       message: "Payment not successful",
+//       data: response.data,
+//     });
+
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 
 /**
  * Get deposit history for a user

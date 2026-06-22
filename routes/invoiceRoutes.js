@@ -3,24 +3,44 @@ const router = express.Router();
 const { authenticateToken } = require("../middlewares/authMiddleware");
 const invoiceController = require("../Controllers/invoiceController");
 
+/**
+ * ======================================================
+ * PUBLIC ROUTES (NO AUTH)
+ * ======================================================
+ */
+
+// Callback MUST be public (Squad redirects here)
+router.get("/callback", invoiceController.handleInvoiceCallback);
+
+// Public verify (used by callback button / testing UI)
+router.post("/verify-payment", invoiceController.verifyInvoicePayment);
+
+/**
+ * ======================================================
+ * PROTECT EVERYTHING BELOW
+ * ======================================================
+ */
+router.use(authenticateToken);
+
+/**
+ * ======================================================
+ * AUTH PROTECTED ROUTES
+ * ======================================================
+ */
+
 router.post(
   "/generate-invoice/:quoteId",
-  authenticateToken,
-  invoiceController.createInvoiceFromAcceptedQuote,
+  invoiceController.createInvoiceFromAcceptedQuote
 );
 
-router.get("/:invoiceId", authenticateToken, invoiceController.getInvoiceById);
+router.get(
+  "/:invoiceId",
+  invoiceController.getInvoiceById
+);
 
 router.post(
   "/:invoiceId/initiate-payment",
-  authenticateToken,
-  invoiceController.initiateInvoicePayment,
-);
-
-router.post(
-  "/verify-payment",
-  authenticateToken,
-  invoiceController.verifyInvoicePayment,
+  invoiceController.initiateInvoicePayment
 );
 
 module.exports = router;

@@ -84,7 +84,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rfq", rfqRoutes);
-app.use("/api/rfqs", rfqRoutes);
+
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);

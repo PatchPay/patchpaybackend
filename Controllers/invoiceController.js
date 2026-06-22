@@ -234,7 +234,7 @@ exports.initiateInvoicePayment = async (req, res) => {
     const paymentReference =
       invoice.paymentReference ||
       `INV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/invoices/callback`;
+    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:5000"}/api/invoices/callback`;
 
     const payment = await squadService.initiateCollection({
       amount: invoice.amount,
@@ -270,6 +270,95 @@ exports.initiateInvoicePayment = async (req, res) => {
   }
 };
 
+exports.handleInvoiceCallback = async (req, res) => {
+  const transaction_ref =
+    req.query.reference ||
+    req.query.transaction_ref ||
+    req.query.paymentReference;
+
+  if (!transaction_ref) {
+    return res.send(`
+      <h2>❌ Invalid Invoice Callback</h2>
+      <p>No transaction reference found</p>
+    `);
+  }
+
+  return res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Invoice Payment Status</title>
+      <style>
+        body {
+          font-family: Arial;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          flex-direction: column;
+        }
+
+        button {
+          padding: 10px 20px;
+          margin-top: 15px;
+          cursor: pointer;
+          background: #111;
+          color: white;
+          border: none;
+        }
+
+        .box {
+          text-align: center;
+        }
+      </style>
+    </head>
+
+    <body>
+      <div class="box">
+        <h2>⏳ Processing Invoice Payment...</h2>
+        <p>Transaction Ref:</p>
+        <b>${transaction_ref}</b>
+
+        <br />
+
+        <button onclick="verifyInvoice()">
+          Verify Invoice Payment
+        </button>
+
+        <p id="result"></p>
+      </div>
+
+      <script>
+        async function verifyInvoice() {
+          const res = await fetch("/api/invoices/verify-payment", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              transactionRef: "${transaction_ref}"
+            })
+          });
+
+          const data = await res.json();
+
+          const resultEl = document.getElementById("result");
+
+          if (data.success) {
+            resultEl.innerHTML = "✅ Invoice Paid Successfully!";
+          } else {
+            resultEl.innerHTML = "❌ Payment Failed: " + data.message;
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
+};
+
+
+
+
 exports.verifyInvoicePayment = async (req, res) => {
   try {
     const transactionRef =
@@ -304,22 +393,21 @@ exports.verifyInvoicePayment = async (req, res) => {
     }
 
     const verification = await squadService.verifyCollection(transactionRef);
-    console.log("================================");
-    console.log("VERIFICATION RESPONSE");
-    console.log(JSON.stringify(verification, null, 2));
-    console.log("================================");
-    invoice.gatewayResponse = verification.raw;
-    console.log("verification.status =", verification.status);
-    console.log("verification.raw?.status =", verification.raw?.status);
-    console.log("verification.raw?.data?.status =", verification.raw?.data?.status);
-    console.log(
-      "verification.raw?.data?.transaction_status =",
-      verification.raw?.data?.transaction_status,
-    );
-    const isSuccessfulPayment =
-      verification.raw?.status === 200 &&
-      verification.raw?.data?.status === "success" &&
-      verification.raw?.data?.transaction_status === "success";
+
+console.log("================================");
+console.log("VERIFICATION RESPONSE");
+console.log(JSON.stringify(verification, null, 2));
+console.log("================================");
+
+invoice.gatewayResponse = verification.raw;
+
+const tx = verification.raw?.data || {};
+
+const isSuccessfulPayment =
+  verification.raw?.status === 200 &&
+  tx.transaction_status === "success";
+
+console.log("TX STATUS:", tx.transaction_status);
 
     if (!isSuccessfulPayment) {
       invoice.paymentStatus = "failed";
@@ -380,6 +468,7 @@ exports.verifyInvoicePayment = async (req, res) => {
         invoiceTransaction = new Transaction({
           type: "invoice_payment",
           amount: lockedInvoice.amount,
+            total: lockedInvoice.amount,
           currency: lockedInvoice.currency,
           status: "success",
           senderId: lockedInvoice.requesterId,
@@ -423,6 +512,7 @@ exports.verifyInvoicePayment = async (req, res) => {
         escrowFundingTransaction = new Transaction({
           type: "escrow_funding",
           amount: lockedInvoice.amount,
+          total: lockedInvoice.amount,
           currency: lockedInvoice.currency,
           status: "success",
           senderId: lockedInvoice.requesterId,

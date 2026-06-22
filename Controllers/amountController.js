@@ -1,5 +1,7 @@
 import Amount from '../models/amount.js';
 
+
+
 // Create a new amount
 exports.createAmount = async (req, res) => {
   try {
