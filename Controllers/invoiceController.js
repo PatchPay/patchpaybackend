@@ -234,7 +234,7 @@ exports.initiateInvoicePayment = async (req, res) => {
     const paymentReference =
       invoice.paymentReference ||
       `INV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:5000"}/api/invoices/callback`;
+    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/invoices/callback`;
 
     const payment = await squadService.initiateCollection({
       amount: invoice.amount,
