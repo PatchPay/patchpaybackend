@@ -1,3 +1,4 @@
+
 const DepositPayment = require("../models/DepositPayment");
 const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
@@ -56,7 +57,7 @@ exports.initiateDeposit = async (req, res) => {
       });
     }
 
-    const callbackUrl = `${process.env.FRONTEND_URL || "http://localhost:8081"}/api/payments/deposit/callback`;
+    const callbackUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/api/payments/deposit/callback`;
 
     const payload = {
       amount: Number(amount) * 100, // Amount in kobo
@@ -148,27 +149,41 @@ exports.initiateDeposit = async (req, res) => {
  */
 exports.handleWebhook = async (req, res) => {
   console.log("🔥 WEBHOOK HIT");
-
+  console.log("HEADERS:", req.headers);
+  console.log("BODY:", req.body);
   try {
-    let event;
-    if (req.body instanceof Buffer) {
-      event = JSON.parse(req.body.toString("utf8"));
-    } else {
-      event = req.body;
+    // Verify webhook signature
+    const signature = req.headers["x-squad-signature"];
+    const webhookSecret = process.env.SQUAD_WEBHOOK_SECRET;
+
+    if (!signature || !webhookSecret) {
+      console.error("Missing webhook signature or secret");
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    console.log("EVENT:", event);
+    // Compute HMAC
+    const hmac = crypto.createHmac("sha512", webhookSecret);
+    const computedSignature = hmac
+      .update(JSON.stringify(req.body))
+      .digest("hex");
 
-    // ✅ Fix: Squad uses "charge_successful" with capital E
-    if (event.Event !== "charge_successful") {
+    // Compare signatures
+    if (computedSignature !== signature) {
+      console.error("Invalid webhook signature");
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid signature" });
+    }
+
+    // Process webhook
+    const event = req.body;
+
+    // Only process successful transactions
+    if (event.event !== "charge.success") {
       return res.status(200).json({ success: true, message: "Event ignored" });
     }
 
-    // ✅ Fix: TransactionRef is at root level, data is in Body
-    const transaction_ref = event.TransactionRef;
-    const bodyData = event.Body;
-
-    console.log("Transaction Ref:", transaction_ref);
+    const { transaction_ref, amount, customer, currency } = event.data;
 
     // Find the payment
     const payment = await DepositPayment.findOne({
@@ -184,16 +199,18 @@ exports.handleWebhook = async (req, res) => {
         .json({ success: false, message: "Payment not found" });
     }
 
+    // If payment is already processed, ignore
     if (payment.status === "successful") {
       return res
         .status(200)
         .json({ success: true, message: "Payment already processed" });
     }
 
-    // ✅ Fix: Use bodyData fields
+    // Update payment status
     payment.status = "successful";
-    payment.squadRef = bodyData.gateway_ref || "";
-    payment.gatewayResponse = event;
+    payment.squadRef = event.data.transaction_id || "";
+    payment.gatewayResponse = event.data;
+    payment.gatewayResponseCode = event.data.response_code || "";
 
     // Find user's wallet
     const wallet = await Wallet.findOne({ userId: payment.userId });
@@ -206,43 +223,37 @@ exports.handleWebhook = async (req, res) => {
         .json({ success: false, message: "Wallet not found" });
     }
 
-    // Check if transaction already exists
-    let transaction = await Transaction.findOne({ reference: transaction_ref });
+    // Create transaction
+    const transaction = new Transaction({
+      type: "deposit",
+      amount: payment.amount,
+      currency: payment.currency,
+      status: "completed",
+      recipientWallet: wallet._id,
+      recipientId: payment.userId,
+      reference: payment.transactionRef,
+      description: "Deposit via Squad payment gateway",
+      externalReference: payment.squadRef,
+    });
 
-    if (!transaction) {
-      transaction = new Transaction({
-        type: "deposit",
-        amount: payment.amount,
-        currency: payment.currency,
-        status: "completed",
-        recipientWallet: wallet._id,
-        recipientId: payment.userId,
-        reference: transaction_ref,
-        description: "Deposit via Squad payment gateway",
-        externalReference: payment.squadRef,
-        isUserAccountTransfer: false, // ✅ deposits are not user account transfers
-        paymentMethod: "bank", // ✅ matches your enum
-        paymentGateway: "Internal",
-        total: payment.amount,
-      });
+    await transaction.save();
 
-      await transaction.save();
+    // Add amount to wallet
+    wallet.balance += payment.amount;
+    await wallet.save();
 
-      // Add amount to wallet
-      wallet.balance += payment.amount;
-      await wallet.save();
-    }
-
+    // Update payment with transaction ID
     payment.transactionId = transaction._id;
     await payment.save();
 
     console.log(
-      `✅ Deposit successful: ${payment.amount} ${payment.currency} for user ${payment.userId}`,
+      `Deposit successful: ${payment.amount} ${payment.currency} for user ${payment.userId}`,
     );
 
-    return res
-      .status(200)
-      .json({ success: true, message: "Deposit processed successfully" });
+    return res.status(200).json({
+      success: true,
+      message: "Deposit processed successfully",
+    });
   } catch (error) {
     console.error("Webhook processing error:", error);
     return res.status(500).json({
@@ -253,6 +264,11 @@ exports.handleWebhook = async (req, res) => {
   }
 };
 
+
+/**
+ * Callback a deposit payment
+ * @route GET /api/payments/deposit/callback
+ */
 exports.handleCallback = async (req, res) => {
   const transaction_ref = req.query.transaction_ref || req.query.reference;
 
@@ -382,7 +398,7 @@ exports.verifyDeposit = async (req, res) => {
 
     // Verify with Squad API
     const squadApiUrl =
-      process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
+      process.env.SQUAD_API_BASE_URL || "https://api.squadco.com";
     const squadSecretKey = process.env.SQUAD_SECRET_KEY;
 
     if (!squadSecretKey) {
@@ -406,7 +422,7 @@ exports.verifyDeposit = async (req, res) => {
       payment.gatewayResponse = response.data;
 
       if (
-        response.data &&
+       response.data &&
         response.data.status === 200 &&
         response.data.data.transaction_status === "success"
       ) {
@@ -481,15 +497,9 @@ exports.verifyDeposit = async (req, res) => {
         });
       } else {
         // Payment verification failed
-        // In verifyDeposit, when payment verification fails:
         payment.status = "failed";
         payment.errorMessage =
           response.data.message || "Payment verification failed";
-        // Don't use response.data.message if it's "Success" — that's misleading
-        payment.errorMessage =
-          response.data.data?.transaction_status !== "success"
-            ? response.data.message || "Payment verification failed"
-            : "Wallet or transaction error after successful payment";
         await payment.save();
 
         return res.status(400).json({
@@ -519,149 +529,6 @@ exports.verifyDeposit = async (req, res) => {
     });
   }
 };
-
-
-// exports.verifyDeposit = async (req, res) => {
-//   try {
-//     const { transactionRef } = req.body;
-
-//     // 👇 If opened in browser (no JSON body), show HTML UI
-//     if (!transactionRef && req.method === "GET") {
-//       return res.send(`
-//         <!DOCTYPE html>
-//         <html>
-//         <head>
-//           <title>Verify Deposit (Debug)</title>
-//           <style>
-//             body {
-//               font-family: Arial;
-//               max-width: 600px;
-//               margin: 50px auto;
-//               padding: 20px;
-//             }
-//             input {
-//               width: 100%;
-//               padding: 10px;
-//               margin-bottom: 10px;
-//             }
-//             button {
-//               padding: 10px 15px;
-//               cursor: pointer;
-//             }
-//             pre {
-//               background: #111;
-//               color: #0f0;
-//               padding: 15px;
-//               margin-top: 20px;
-//               overflow-x: auto;
-//             }
-//           </style>
-//         </head>
-//         <body>
-
-//           <h2>🔍 Deposit Verification Debug</h2>
-
-//           <input id="ref" placeholder="Enter Transaction Ref (PP-xxxx)" />
-
-//           <button onclick="verify()">Verify</button>
-
-//           <pre id="output">Result will appear here...</pre>
-
-//           <script>
-//             async function verify() {
-//               const transactionRef = document.getElementById("ref").value;
-
-//               const res = await fetch("/api/payments/deposit/verify", {
-//                 method: "POST",
-//                 headers: {
-//                   "Content-Type": "application/json"
-//                 },
-//                 body: JSON.stringify({ transactionRef })
-//               });
-
-//               const data = await res.json();
-//               document.getElementById("output").textContent =
-//                 JSON.stringify(data, null, 2);
-//             }
-//           </script>
-
-//         </body>
-//         </html>
-//       `);
-//     }
-
-//     // ❌ validation
-//     if (!transactionRef) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Transaction reference is required",
-//       });
-//     }
-
-//     // 🔍 Find payment
-//     const payment = await DepositPayment.findOne({ transactionRef });
-
-//     if (!payment) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Payment not found",
-//       });
-//     }
-
-//     if (payment.status === "successful") {
-//       return res.status(200).json({
-//         success: true,
-//         message: "Payment already verified",
-//         data: payment,
-//       });
-//     }
-
-//     // 👇 keep your existing Squad verification logic below
-//     const squadApiUrl =
-//       process.env.SQUAD_API_BASE_URL || "https://sandbox-api-d.squadco.com";
-//     const squadSecretKey = process.env.SQUAD_SECRET_KEY;
-
-//     const response = await axios.get(
-//       `${squadApiUrl}/transaction/verify/${transactionRef}`,
-//       {
-//         headers: {
-//           Authorization: `Bearer ${squadSecretKey}`,
-//         },
-//       }
-//     );
-
-//     payment.gatewayResponse = response.data;
-
-//     if (
-//       response.data &&
-//       response.data.status === 200 &&
-//       response.data.data.transaction_status === "success"
-//     ) {
-//       payment.status = "successful";
-//       await payment.save();
-
-//       return res.json({
-//         success: true,
-//         message: "Payment verified successfully",
-//         data: payment,
-//       });
-//     }
-
-//     return res.status(400).json({
-//       success: false,
-//       message: "Payment not successful",
-//       data: response.data,
-//     });
-
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
 
 /**
  * Get deposit history for a user
