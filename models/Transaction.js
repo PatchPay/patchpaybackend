@@ -111,7 +111,7 @@ const transactionSchema = new mongoose.Schema({
   // Payment gateway for deposits
   paymentGateway: {
     type: String,
-    enum: ['GTB', 'Switch', 'Internal'],
+    enum: ['GTB', 'Switch', 'Internal','SquadCo'],
     default: 'Internal'
   },
   
