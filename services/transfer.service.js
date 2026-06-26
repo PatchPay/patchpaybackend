@@ -321,7 +321,11 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
       transaction.status = mapTransactionStatus(payoutResult.status);
       transaction.externalReference = payoutResult.providerReference;
       transaction.providerReference = payoutResult.providerReference;
-      transaction.providerResponses.push(payoutResult.raw);
+   if (!transaction.providerResponses) {
+  transaction.providerResponses = [];
+}
+
+transaction.providerResponses.push(payoutResult.raw);
       addAudit(
         transaction,
         transaction.status,
