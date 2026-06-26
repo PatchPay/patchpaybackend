@@ -603,26 +603,42 @@ const externalBankTransfer = async ({
     });
     return { ...finalized, repeated: false };
   } catch (error) {
-    if (error.retryable) {
-      const pending = await markPayoutRetryable({
-        withdrawal,
-        transaction,
-        error,
-      });
-      return { ...pending, repeated: false, retryRequired: true };
-    }
-
-    const failed = await finalizePayout({
+  if (error.retryable) {
+    await markPayoutRetryable({
       withdrawal,
       transaction,
-      payoutResult: {
-        status: "failed",
-        raw: error.providerResponse || { message: error.message },
-        providerReference: null,
-      },
+      error,
     });
-    return { ...failed, repeated: false };
+
+    const err = new Error(
+      "Transfer is still processing. Please check your transaction history shortly."
+    );
+    err.statusCode = 202;
+    throw err;
   }
+
+  await finalizePayout({
+    withdrawal,
+    transaction,
+    payoutResult: {
+      status: "failed",
+      raw: error.providerResponse || { message: error.message },
+      providerReference: null,
+    },
+  });
+
+  // Throw a clean error to the frontend
+  const err = new Error(
+    error.response?.data?.message ||
+    error.providerResponse?.message ||
+    error.message ||
+    "External bank transfer failed."
+  );
+
+  err.statusCode = error.statusCode || 400;
+
+  throw err;
+}
 };
 
 const verifyExternalTransferStatus = async (transactionRef) => {
