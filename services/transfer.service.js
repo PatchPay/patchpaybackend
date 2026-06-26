@@ -83,7 +83,10 @@ const addAudit = (doc, status, message, metadata = {}) => {
 };
 
 const mapTransactionStatus = (status) => {
-  if (status === "success" || status === "successful") return "success";
+  if (status === "success" || status === "successful") {
+    return "completed";
+  }
+
   return status;
 };
 
@@ -310,26 +313,57 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
   session.startTransaction();
 
   try {
+    // 🔥 Reload fresh copies from MongoDB
+    withdrawal = await WithdrawalPayment.findById(withdrawal._id).session(session);
+
+    if (!withdrawal) {
+      throw new Error("Withdrawal record not found");
+    }
+
+    if (transaction) {
+      transaction = await Transaction.findById(transaction._id).session(session);
+
+      if (!transaction) {
+        throw new Error("Transaction record not found");
+      }
+    }
+
+    // Ensure arrays exist
+    withdrawal.providerResponses ??= [];
+    withdrawal.auditTrail ??= [];
+
+    if (transaction) {
+      transaction.providerResponses ??= [];
+      transaction.auditTrail ??= [];
+    }
+
     const status = mapWithdrawalStatus(payoutResult.status);
+
     withdrawal.status = status;
-    withdrawal.squadRef = payoutResult.providerReference || withdrawal.squadRef;
+    withdrawal.squadRef =
+      payoutResult.providerReference || withdrawal.squadRef;
     withdrawal.gatewayResponse = payoutResult.raw;
     withdrawal.providerResponses.push(payoutResult.raw);
-    addAudit(withdrawal, status, "SquadCo payout response received");
+
+    addAudit(
+      withdrawal,
+      status,
+      "SquadCo payout response received"
+    );
 
     if (transaction) {
       transaction.status = mapTransactionStatus(payoutResult.status);
-      transaction.externalReference = payoutResult.providerReference;
-      transaction.providerReference = payoutResult.providerReference;
-   if (!transaction.providerResponses) {
-  transaction.providerResponses = [];
-}
+      transaction.externalReference =
+        payoutResult.providerReference;
+      transaction.providerReference =
+        payoutResult.providerReference;
 
-transaction.providerResponses.push(payoutResult.raw);
+      transaction.providerResponses.push(payoutResult.raw);
+
       addAudit(
         transaction,
         transaction.status,
-        "Transfer status updated from SquadCo",
+        "Transfer status updated from SquadCo"
       );
     }
 
@@ -343,24 +377,35 @@ transaction.providerResponses.push(payoutResult.raw);
         amount: transaction.total,
         session,
       });
+
       withdrawal.refunded = true;
       transaction.status = "reversed";
+
       addAudit(
         transaction,
         "reversed",
-        "Wallet debit reversed after failed payout",
+        "Wallet debit reversed after failed payout"
       );
+
       addAudit(
         withdrawal,
         "reversed",
-        "Wallet debit reversed after failed payout",
+        "Wallet debit reversed after failed payout"
       );
     }
 
     await withdrawal.save({ session });
-    if (transaction) await transaction.save({ session });
+
+    if (transaction) {
+      await transaction.save({ session });
+    }
+
     await session.commitTransaction();
-    return { withdrawal, transaction };
+
+    return {
+      withdrawal,
+      transaction,
+    };
   } catch (error) {
     await session.abortTransaction();
     throw error;
