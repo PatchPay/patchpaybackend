@@ -4,7 +4,14 @@ const transactionSchema = new mongoose.Schema({
   // Transaction type (transfer, deposit, withdrawal)
   type: {
     type: String,
-    enum: ['transfer', 'deposit', 'withdrawal'],
+    enum: [
+    "transfer",
+    "deposit",
+    "withdrawal",
+    "invoice_payment",
+    "escrow_funding",
+    "escrow_release"
+  ],
     required: true
   },
   
@@ -35,7 +42,7 @@ const transactionSchema = new mongoose.Schema({
   // Transaction status
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'reversed', 'pending_verification','processing'],
+    enum: ['pending', 'success', 'completed', 'failed', 'reversed', 'pending_verification','processing'],
     default: 'pending'
   },
   
