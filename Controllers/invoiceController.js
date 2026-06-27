@@ -470,7 +470,7 @@ console.log("TX STATUS:", tx.transaction_status);
           amount: lockedInvoice.amount,
             total: lockedInvoice.amount,
           currency: lockedInvoice.currency,
-          status: "success",
+          status: "completed",
           senderId: lockedInvoice.requesterId,
           recipientId: lockedInvoice.recipientId,
           reference: transactionRef,
