@@ -133,8 +133,8 @@ const getEscrows = async (req, res) => {
     }
 
     const escrows = await Escrow.find(query)
-      .populate('creatorId', 'firstName lastName email')
-      .populate('recipientId', 'firstName lastName email')
+      .populate('creatorId', 'firstName surname email')
+      .populate('recipientId', 'firstName surname email')
       .sort({ createdAt: -1 });
 
     // Fetch associated quotes for each escrow
@@ -162,6 +162,9 @@ const getEscrows = async (req, res) => {
     });
   }
 };
+
+
+const getEscrowsbyuser
 
 // Get a single escrow by ID
 const getEscrowById = async (req, res) => {
