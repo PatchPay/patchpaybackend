@@ -164,7 +164,40 @@ const getEscrows = async (req, res) => {
 };
 
 
-const getEscrowsbyuser
+const getMyEscrows = async (req, res) => {
+  try {
+
+    const userId = req.user._id;
+
+
+    const escrows = await Escrow.find({
+      $or: [
+        { creatorId: userId },
+        { recipientId: userId }
+      ]
+    })
+    .populate("creatorId", "firstName lastName email phoneNumber")
+    .populate("recipientId", "firstName lastName email phoneNumber")
+    .sort({ createdAt: -1 });
+
+
+    res.status(200).json({
+      success: true,
+      data: escrows
+    });
+
+
+  } catch(error){
+
+    console.error("Error getting user escrows:", error);
+
+    res.status(500).json({
+      success:false,
+      message:"Failed to fetch escrows"
+    });
+
+  }
+};
 
 // Get a single escrow by ID
 const getEscrowById = async (req, res) => {
@@ -477,6 +510,7 @@ module.exports = {
   createEscrow,
   getEscrows,
   getEscrowById,
+  getMyEscrows,
   fundEscrow,
   releaseEscrow,
   refundEscrow,
