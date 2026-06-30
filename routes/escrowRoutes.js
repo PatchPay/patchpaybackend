@@ -10,6 +10,7 @@ const {
   createEscrow,
   getEscrows,
   getEscrowById,
+  getMyEscrows,
   fundEscrow,
   releaseEscrow,
   refundEscrow,
@@ -22,6 +23,9 @@ router.post("/", authenticateToken, validateEscrowCreation, createEscrow);
 
 // Get all escrows for the authenticated user
 router.get("/", authenticateToken, getEscrows);
+
+//Get escrow by the user either creator or recepient
+router.get('/my-escrow', authenticateToken, getMyEscrows)
 
 // Get a specific escrow by ID
 router.get("/:id", authenticateToken, checkEscrowPermission, getEscrowById);
