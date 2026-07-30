@@ -6,7 +6,7 @@ exports.createPayment = async (req, res) => {
   const { user, amount, payment_method, transaction_reference } = req.body;
 
   try {
-    const newPayment = new Payment({
+    const newPayment = await Payment.create({
       user,
       amount,
       payment_method,
@@ -14,10 +14,10 @@ exports.createPayment = async (req, res) => {
       status: 'Pending'
     });
 
-    await newPayment.save();
+  
 
     // Create a transaction for the payment
-    const newTransaction = new Transaction({
+    const newTransaction = await Transaction.create({
       type: 'deposit',
       amount,
       reference: transaction_reference,
@@ -26,7 +26,7 @@ exports.createPayment = async (req, res) => {
       description: `Payment via ${payment_method}`
     });
 
-    await newTransaction.save();
+  
 
     res.status(201).json({
       success: true,
@@ -49,7 +49,9 @@ exports.createPayment = async (req, res) => {
 // Get all payments
 exports.getAllPayments = async (req, res) => {
   try {
-    const payments = await Payment.find().sort({ createdAt: -1 });
+  const payments = await Payment.findAll({
+  order: [["created_at", "DESC"]],
+});
     res.status(200).json({
       success: true,
       count: payments.length,
@@ -63,7 +65,7 @@ exports.getAllPayments = async (req, res) => {
 // Get payment by ID
 exports.getPaymentById = async (req, res) => {
   try {
-    const payment = await Payment.findById(req.params.id);
+    const payment = await Payment.findByPk(req.params.id);
     
     if (!payment) {
       return res.status(404).json({

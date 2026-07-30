@@ -1,29 +1,83 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
-const bcrypt = require("bcryptjs");
-require("dotenv").config();
+const morgan = require("morgan");
 const axios = require("axios");
+require("dotenv").config();
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./swagger");
 
-// Import Routes
+const sequelize = require("./config/database");
+require("./models");
+
+// Routes
 const userRoutes = require("./routes/userRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const rfqRoutes = require("./routes/rfqRoutes");
+const invoiceRoutes = require("./routes/invoiceRoutes");
 const escrowRoutes = require("./routes/escrowRoutes");
 const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
 const transferRoutes = require("./routes/transferRoutes");
-const invoiceRoutes = require("./routes/invoiceRoutes");
 
-// Import Cron Jobs
+// Services
+const bankService = require("./services/bankService");
+
+// Cron Jobs
 const startQuoteNotificationCron = require("./cron/quoteNotifications");
 const startEscrowExpiryCron = require("./cron/escrowExpiry");
-const bankService = require("./services/bankService");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+console.log(
+  "- SQUAD_SECRET_KEY:",
+  process.env.SQUAD_SECRET_KEY ? "[SET]" : "[NOT SET]"
+);
+
+/* ===========================
+   MIDDLEWARE
+=========================== */
+
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  })
+);
+
+app.use(morgan("dev"));
+
+// Webhook must use raw body BEFORE express.json()
+app.use(
+  "/api/payments/deposit/webhook",
+  express.raw({ type: "application/json" })
+);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/* ===========================
+   ROOT / HEALTH ROUTES
+=========================== */
+
+app.get("/", (req, res) => {
+  res.send("🚀 PatchPay Backend is running...");
+});
+
+app.get("/api", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "🚀 PatchPay API is ready.",
+    status: "OK",
+    version: "v1",
+  });
+});
+
+/* ===========================
+   TEST ROUTE
+=========================== */
 
 app.get("/squad-balance", async (req, res) => {
   try {
@@ -33,58 +87,32 @@ app.get("/squad-balance", async (req, res) => {
         headers: {
           Authorization: `Bearer ${process.env.SQUAD_SECRET_KEY}`,
         },
-      },
+      }
     );
 
-    return res.json(response.data);
+    res.json(response.data);
   } catch (error) {
-    console.log(error.response?.data);
-
-    return res.status(error.response?.status || 500).json({
+    res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data || error.message,
     });
   }
 });
 
-// Log environment variables (redacted for security)
-console.log("Environment loaded:");
-console.log("- MONGO_URI:", process.env.MONGO_URI ? "[SET]" : "[NOT SET]");
-console.log("- JWT_SECRET:", process.env.JWT_SECRET ? "[SET]" : "[NOT SET]");
-console.log("- PORT:", process.env.PORT || 5000);
-console.log("- NODE_ENV:", process.env.NODE_ENV || "development");
-console.log(
-  "- SQUAD_SECRET_KEY:",
-  process.env.SQUAD_SECRET_KEY ? "[SET]" : "[NOT SET]",
-);
-
-// Middleware
-
-app.use(cors());
-// ⚠️ Webhook raw body MUST be before express.json()
 app.use(
-  "/api/payments/deposit/webhook",
-  express.raw({ type: "application/json" }),
+  "/api-docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec)
 );
-app.use(express.json()); // Replaces bodyParser.json()
-app.use(express.urlencoded({ extended: true })); // Parses form data
 
-// MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI;
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected to Atlas"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+/* ===========================
+   API ROUTES
+=========================== */
 
-// Import User Model
-const User = require("./models/User"); // Fixed model import path
-
-// Mount Routes
 app.use("/api/users", userRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rfq", rfqRoutes);
-
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);
@@ -92,16 +120,23 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/transfers", transferRoutes);
 
-// Error handling middleware
+/* ===========================
+   ERROR HANDLING
+=========================== */
+
 app.use((err, req, res, next) => {
-  console.error("Error:", err);
+  console.error(err);
+
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || "Internal server error",
+    message: err.message || "Internal Server Error",
   });
 });
 
-// Handle 404 routes
+/* ===========================
+   404
+=========================== */
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -109,44 +144,35 @@ app.use((req, res) => {
   });
 });
 
-app.get("/api", (req, res) => {
-  res.json({
-    success: true,
-    message: "Welcome to PatchPay API",
-    routes: {
-      users: "/api/users",
-      wallet: "/api/wallet",
-      payments: "/api/payments",
-      rfq: "/api/rfq",
-      rfqs: "/api/rfqs",
-      invoices: "/api/invoices",
-      escrow: "/api/escrow",
-      escrowTransactions: "/api/escrow-transactions",
-      notifications: "/api/notifications",
-      transfers: "/api/transfers",
-    },
-  });
-});
+/* ===========================
+   START SERVER
+=========================== */
 
-// Start Server
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+async function startServer() {
+  try {
+    await sequelize.authenticate();
 
-  // Start bank sync in background
-  bankService
-    .syncBanksFromSquad()
-    .then(() => console.log("✅ Squad bank list synced to DB"))
-    .catch((err) =>
-      console.warn(
-        "⚠️ Failed to sync Squad bank list on startup:",
-        err.message || err,
-      ),
-    );
+    console.log("✅ PostgreSQL Connected");
 
-  // Start cron jobs
-  startQuoteNotificationCron();
-  console.log("📅 Quote notification cron job started");
+    await bankService
+      .syncBanksFromSquad()
+      .then(() => console.log("✅ Squad bank list synced"))
+      .catch((err) =>
+        console.warn("⚠️ Failed to sync banks:", err.message)
+      );
 
-  startEscrowExpiryCron();
-  console.log("⏰ Escrow expiry cron job started");
-});
+    startQuoteNotificationCron();
+    console.log("📅 Quote notification cron started");
+
+    startEscrowExpiryCron();
+    console.log("⏰ Escrow expiry cron started");
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running at http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ Database Connection Error:", err);
+  }
+}
+
+startServer();

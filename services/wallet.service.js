@@ -1,62 +1,76 @@
+const { Op } = require("sequelize");
 const Wallet = require("../models/Wallet");
 
-const getActiveWalletForUser = async (userId, session = null) => {
-  const query = Wallet.findOne({ userId, isActive: true });
-  if (session) query.session(session);
-  return query;
+const getActiveWalletForUser = async (userId, transaction = null) => {
+  return Wallet.findOne({
+    where: { userId, isActive: true },
+    transaction,
+  });
 };
 
-const getActiveWalletByAccountNumber = async (accountNumber, session = null) => {
-  const query = Wallet.findOne({ accountNumber, isActive: true });
-  if (session) query.session(session);
-  return query;
+const getActiveWalletByAccountNumber = async (accountNumber, transaction = null) => {
+  return Wallet.findOne({
+    where: { accountNumber, isActive: true },
+    transaction,
+  });
 };
 
-const debitWallet = async ({ walletId, amount, session }) => {
-  const updatedWallet = await Wallet.findOneAndUpdate(
+const debitWallet = async ({ walletId, amount, transaction }) => {
+  const [affectedCount, affectedRows] = await Wallet.update(
     {
-      _id: walletId,
-      isActive: true,
-      balance: { $gte: amount },
+      balance: Wallet.sequelize.literal(`balance - ${amount}`),
     },
     {
-      $inc: { balance: -amount },
-    },
-    {
-      new: true,
-      session,
+      where: {
+        id: walletId,
+        isActive: true,
+        balance: { [Op.gte]: amount },
+      },
+      transaction,
+      returning: true, // works on Postgres/MSSQL; ignored on MySQL/SQLite
     },
   );
 
-  if (!updatedWallet) {
+  if (!affectedCount) {
     const error = new Error("Insufficient balance");
     error.statusCode = 400;
     throw error;
   }
 
+  // Fallback for dialects without RETURNING support (MySQL/SQLite)
+  const updatedWallet =
+    affectedRows && affectedRows.length
+      ? affectedRows[0]
+      : await Wallet.findByPk(walletId, { transaction });
+
   return updatedWallet;
 };
 
-const creditWallet = async ({ walletId, amount, session }) => {
-  const updatedWallet = await Wallet.findOneAndUpdate(
+const creditWallet = async ({ walletId, amount, transaction }) => {
+  const [affectedCount, affectedRows] = await Wallet.update(
     {
-      _id: walletId,
-      isActive: true,
+      balance: Wallet.sequelize.literal(`balance + ${amount}`),
     },
     {
-      $inc: { balance: amount },
-    },
-    {
-      new: true,
-      session,
+      where: {
+        id: walletId,
+        isActive: true,
+      },
+      transaction,
+      returning: true,
     },
   );
 
-  if (!updatedWallet) {
+  if (!affectedCount) {
     const error = new Error("Wallet not found");
     error.statusCode = 404;
     throw error;
   }
+
+  const updatedWallet =
+    affectedRows && affectedRows.length
+      ? affectedRows[0]
+      : await Wallet.findByPk(walletId, { transaction });
 
   return updatedWallet;
 };

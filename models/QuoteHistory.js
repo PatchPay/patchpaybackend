@@ -1,65 +1,8 @@
-const mongoose = require("mongoose");
-
-const quoteHistorySchema = new mongoose.Schema({
-  quote: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Quote",
-    required: true,
-  },
-  user: {
-    _id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    firstName: {
-      type: String,
-      required: true,
-    },
-    surname: {
-      type: String,
-      required: true,
-    },
-    phoneNumber: {
-      type: String,
-      required: true,
-    },
-  },
-  status: {
-    type: String,
-    enum: ["Pending", "Accepted", "Rejected", "Cancelled", "Deleted"],
-    required: true,
-  },
-  action: {
-    type: String,
-    required: true,
-  },
-  notificationDue: {
-    type: Date,
-  },
-  notificationSent: {
-    type: Boolean,
-    default: false,
-  },
-  deletionDue: {
-    type: Date,
-  },
-  deletionNotificationSent: {
-    type: Boolean,
-    default: false,
-  },
-  deletedAt: {
-    type: Date,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
-
-// Create indexes for efficient querying
-quoteHistorySchema.index({ notificationDue: 1 });
-quoteHistorySchema.index({ deletionDue: 1 });
-quoteHistorySchema.index({ quote: 1, createdAt: -1 });
-
-module.exports = mongoose.model("QuoteHistory", quoteHistorySchema);
+const { DataTypes } = require("sequelize"); const sequelize = require("../config/database");
+const QuoteHistory = sequelize.define("QuoteHistory", { 
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+    , quote: 
+    { type: DataTypes.INTEGER, allowNull: false, references: { model: "quotes", key: "id" } }
+    , user_data: 
+    { type: DataTypes.JSONB, allowNull: false }
+    , status: { type: DataTypes.ENUM("Pending", "Accepted", "Rejected", "Cancelled", "Deleted"), allowNull: false }, action: { type: DataTypes.STRING, allowNull: false }, notificationDue: { type: DataTypes.DATE, field: "notification_due" }, notificationSent: { type: DataTypes.BOOLEAN, defaultValue: false, field: "notification_sent" }, deletionDue: { type: DataTypes.DATE, field: "deletion_due" }, deletionNotificationSent: { type: DataTypes.BOOLEAN, defaultValue: false, field: "deletion_notification_sent" }, deletedAt: { type: DataTypes.DATE, field: "deleted_at" } }, { tableName: "quote_histories", underscored: true, timestamps: true, updatedAt: false, indexes: [{ fields: ["notification_due"] }, { fields: ["deletion_due"] }, { fields: ["quote", "created_at"] }] }); QuoteHistory.associate = (models) => { QuoteHistory.belongsTo(models.Quote, { foreignKey: "quote" }); }; module.exports = QuoteHistory;

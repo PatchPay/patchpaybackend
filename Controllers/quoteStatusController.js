@@ -1,10 +1,10 @@
-import QuoteStatus from '../models/QuoteStatus';
+const QuoteStatus = require('../models/Bkquotes');
+const Quote = require('../models/Quote');
 
 // Create a new QuoteStatus
 exports.createQuoteStatus = async (req, res) => {
   try {
-    const quoteStatus = new QuoteStatus(req.body);
-    await quoteStatus.save();
+    const quoteStatus = await QuoteStatus.create(req.body);
     res.status(201).json(quoteStatus);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -14,7 +14,7 @@ exports.createQuoteStatus = async (req, res) => {
 // Get all QuoteStatus entries
 exports.getAllQuoteStatuses = async (req, res) => {
   try {
-    const quoteStatuses = await QuoteStatus.find().populate('quote');
+    const quoteStatuses = await QuoteStatus.findAll({ include: [Quote] });
     res.status(200).json(quoteStatuses);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -24,7 +24,7 @@ exports.getAllQuoteStatuses = async (req, res) => {
 // Get a single QuoteStatus by ID
 exports.getQuoteStatusById = async (req, res) => {
   try {
-    const quoteStatus = await QuoteStatus.findById(req.params.id).populate('quote');
+    const quoteStatus = await QuoteStatus.findByPk(req.params.id, { include: [Quote] });
     if (!quoteStatus) {
       return res.status(404).json({ message: 'QuoteStatus not found' });
     }
@@ -37,7 +37,8 @@ exports.getQuoteStatusById = async (req, res) => {
 // Update QuoteStatus by ID
 exports.updateQuoteStatus = async (req, res) => {
   try {
-    const quoteStatus = await QuoteStatus.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const quoteStatus = await QuoteStatus.findByPk(req.params.id);
+    if (quoteStatus) await quoteStatus.update(req.body);
     if (!quoteStatus) {
       return res.status(404).json({ message: 'QuoteStatus not found' });
     }

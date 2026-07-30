@@ -19,7 +19,7 @@ const validateEscrowCreation = (req, res, next) => {
 // Check if user has permission to access escrow
 const checkEscrowPermission = async (req, res, next) => {
   try {
-    const escrow = await Escrow.findById(req.params.id);
+    const escrow = await Escrow.findByPk(req.params.id);
     
     if (!escrow) {
       return res.status(404).json({

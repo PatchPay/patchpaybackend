@@ -1,136 +1,175 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const withdrawalPaymentSchema = new mongoose.Schema(
+const WithdrawalPayment = sequelize.define(
+  "WithdrawalPayment",
   {
-    // User who requested the withdrawal
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      field: "user_id",
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: "users",
+        key: "id",
+      },
     },
 
-    // Amount and currency
     amount: {
-      type: Number,
-      required: true,
-      min: 0,
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      validate: {
+        min: 0,
+      },
     },
+
     currency: {
-      type: String,
-      required: true,
-      default: "NGN",
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "NGN",
     },
+
     refunded: {
-      type: Boolean,
-      default: false,
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
 
-    // Transaction references
     transactionRef: {
-      type: String,
-      required: true,
-      index: { unique: true },
+      field: "transaction_ref",
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
     },
+
     squadRef: {
-      type: String,
-      index: { unique: true, sparse: true },
+      field: "squad_ref",
+      type: DataTypes.STRING,
+      unique: true,
+      allowNull: true,
     },
+
     idempotencyKey: {
-      type: String,
-      index: { unique: true, sparse: true },
+      field: "idempotency_key",
+      type: DataTypes.STRING,
+      unique: true,
+      allowNull: true,
     },
+
     flowType: {
-      type: String,
-      enum: ["withdrawal", "external_bank_transfer"],
-      default: "withdrawal",
+      field: "flow_type",
+      type: DataTypes.ENUM(
+        "withdrawal",
+        "external_bank_transfer"
+      ),
+      defaultValue: "withdrawal",
     },
 
-    // Bank account details
     bankCode: {
-      type: String,
-      required: true,
+      field: "bank_code",
+      type: DataTypes.STRING,
+      allowNull: false,
     },
+
     accountNumber: {
-      type: String,
-      required: true,
+      field: "account_number",
+      type: DataTypes.STRING,
+      allowNull: false,
     },
+
     accountName: {
-      type: String,
-      required: true,
+      field: "account_name",
+      type: DataTypes.STRING,
+      allowNull: false,
     },
 
-    // Payment status
     status: {
-      type: String,
-      enum: ["initiated", "pending", "processing", "success", "successful", "failed", "reversed"],
-      default: "pending",
+      type: DataTypes.ENUM(
+        "initiated",
+        "pending",
+        "processing",
+        "success",
+        "successful",
+        "failed",
+        "reversed"
+      ),
+      defaultValue: "pending",
     },
 
-    // Payment gateway data
-    gatewayResponse: {
-      type: Object,
-    },
-    gatewayResponseCode: {
-      type: String,
-    },
+   gatewayResponse: {
+  field: "gateway_response",
+  type: DataTypes.JSONB,
+  allowNull: true,
+},
+
+gatewayResponseCode: {
+  field: "gateway_response_code",
+  type: DataTypes.STRING,
+},
+
+providerResponses: {
+  field: "provider_responses",
+  type: DataTypes.JSONB,
+  defaultValue: [],
+},
+
+auditTrail: {
+  field: "audit_trail",
+  type: DataTypes.JSONB,
+  defaultValue: [],
+},
+
+ipAddress: {
+  field: "ip_address",
+  type: DataTypes.STRING,
+},
+
+userAgent: {
+  field: "user_agent",
+  type: DataTypes.TEXT,
+},
+
+errorMessage: {
+  field: "error_message",
+  type: DataTypes.TEXT,
+},
+
+errorCode: {
+  field: "error_code",
+  type: DataTypes.STRING,
+},
 
     metadata: {
-      type: mongoose.Schema.Types.Mixed,
-      default: {},
+      type: DataTypes.JSONB,
+      defaultValue: {},
     },
 
-    providerResponses: {
-      type: [mongoose.Schema.Types.Mixed],
-      default: [],
-    },
+ 
 
-    auditTrail: {
-      type: [
-        {
-          status: String,
-          message: String,
-          metadata: mongoose.Schema.Types.Mixed,
-          createdAt: {
-            type: Date,
-            default: Date.now,
-          },
-        },
-      ],
-      default: [],
-    },
-
-    // Transaction ID (after successful withdrawal)
     transactionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Transaction",
+        field: "transaction_id",
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "transactions",
+        key: "id",
+      },
     },
 
-    // Metadata
-    ipAddress: {
-      type: String,
-    },
-    userAgent: {
-      type: String,
-    },
 
-    // Error information
-    errorMessage: {
-      type: String,
-    },
-    errorCode: {
-      type: String,
-    },
+
+
   },
-  { timestamps: true },
+  {
+    tableName: "withdrawal_payments",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  }
 );
-
-// Add indexes for faster querying
-withdrawalPaymentSchema.index({ userId: 1, createdAt: -1 });
-withdrawalPaymentSchema.index({ status: 1 });
-withdrawalPaymentSchema.index({ createdAt: 1 });
-
-const WithdrawalPayment =
-  mongoose.models.WithdrawalPayment ||
-  mongoose.model("WithdrawalPayment", withdrawalPaymentSchema);
 
 module.exports = WithdrawalPayment;

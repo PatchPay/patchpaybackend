@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+const sequelize = require("../config/database");
 
 const Escrow = require("../models/Escrow");
 const Invoice = require("../models/Invoice");
@@ -8,9 +8,9 @@ const User = require("../models/User");
 const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
 
-const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
-  const requesterId = quote.user?._id || quote.user;
-  const recipientId = quote.destinatary_user?._id || quote.destinatary_user;
+const buildInvoiceFromAcceptedQuote = async (quote, transaction = null) => {
+  const requesterId = quote.user?.id || quote.user || quote.user_data?.id;
+  const recipientId = quote.destinatary_user?.id || quote.destinatary_user?.id || quote.destinatary_user?.userId;
 
   if (!requesterId || !recipientId) {
     const error = new Error("Quote is missing requester or recipient data");
@@ -32,32 +32,30 @@ const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
   }
 
   console.log("STEP: before Invoice.findOne createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
+    quoteId: quote.id,
   });
-  const existingInvoice = await Invoice.findOne({ rfqId: quote._id }).session(
-    session,
-  );
+  const existingInvoice = await Invoice.findOne({ where: { rfqId: quote.id }, transaction });
   console.log("STEP: after Invoice.findOne createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
+    quoteId: quote.id,
     invoiceFound: !!existingInvoice,
   });
 
   if (existingInvoice) {
     if (!quote.invoice) {
-      quote.invoice = existingInvoice._id;
+      quote.invoice = existingInvoice.id;
       console.log(
         "STEP: before quote.save existing invoice createInvoiceFromAcceptedQuote",
         {
-          quoteId: quote._id,
-          invoiceId: existingInvoice._id,
+          quoteId: quote.id,
+          invoiceId: existingInvoice.id,
         },
       );
-      await quote.save({ session });
+      await quote.save({ transaction });
       console.log(
         "STEP: after quote.save existing invoice createInvoiceFromAcceptedQuote",
         {
-          quoteId: quote._id,
-          invoiceId: existingInvoice._id,
+          quoteId: quote.id,
+          invoiceId: existingInvoice.id,
         },
       );
     }
@@ -68,12 +66,11 @@ const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
   }
 
   console.log("STEP: before Invoice.create createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
+    quoteId: quote.id,
   });
-  const [invoice] = await Invoice.create(
-    [
+  const invoice = await Invoice.create(
       {
-        rfqId: quote._id,
+        rfqId: quote.id,
         requesterId,
         recipientId,
         amount,
@@ -85,29 +82,27 @@ const buildInvoiceFromAcceptedQuote = async (quote, session = null) => {
           quoteNumber: quote.quote_number,
           productQuantity: quote.product_quantity,
         },
-      },
-    ],
-    { session },
+      }, { transaction },
   );
   console.log("STEP: after Invoice.create createInvoiceFromAcceptedQuote", {
-    quoteId: quote._id,
-    invoiceId: invoice?._id,
+    quoteId: quote.id,
+    invoiceId: invoice?.id,
   });
 
-  quote.invoice = invoice._id;
+  quote.invoice = invoice.id;
   console.log(
     "STEP: before quote.save new invoice createInvoiceFromAcceptedQuote",
     {
-      quoteId: quote._id,
-      invoiceId: invoice._id,
+      quoteId: quote.id,
+      invoiceId: invoice.id,
     },
   );
-  await quote.save({ session });
+  await quote.save({ transaction });
   console.log(
     "STEP: after quote.save new invoice createInvoiceFromAcceptedQuote",
     {
-      quoteId: quote._id,
-      invoiceId: invoice._id,
+      quoteId: quote.id,
+      invoiceId: invoice.id,
     },
   );
 
@@ -132,14 +127,14 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
   try {
     const { quoteId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(quoteId)) {
+    if (!Number.isInteger(Number(quoteId))) {
       return res.status(400).json({
         success: false,
         message: "Invalid quote ID",
       });
     }
 
-    const quote = await Quote.findById(quoteId);
+    const quote = await Quote.findByPk(quoteId);
 
     if (!quote) {
       return res.status(404).json({
@@ -201,7 +196,7 @@ exports.initiateInvoicePayment = async (req, res) => {
   try {
     const { invoiceId } = req.params;
 
-    const invoice = await Invoice.findById(invoiceId);
+    const invoice = await Invoice.findByPk(invoiceId);
     if (!invoice) {
       return res.status(404).json({
         success: false,
@@ -223,7 +218,7 @@ exports.initiateInvoicePayment = async (req, res) => {
       });
     }
 
-    const requester = await User.findById(invoice.requesterId);
+    const requester = await User.findByPk(invoice.requesterId);
     if (!requester) {
       return res.status(404).json({
         success: false,
@@ -243,7 +238,7 @@ exports.initiateInvoicePayment = async (req, res) => {
       transactionRef: paymentReference,
       callbackUrl,
       metadata: {
-        invoiceId: invoice._id.toString(),
+        invoiceId: invoice.id.toString(),
         rfqId: invoice.rfqId.toString(),
         paymentType: "invoice",
       },
@@ -373,7 +368,7 @@ exports.verifyInvoicePayment = async (req, res) => {
       });
     }
 
-    const invoice = await Invoice.findOne({ paymentReference: transactionRef });
+    const invoice = await Invoice.findOne({ where: { paymentReference: transactionRef } });
     if (!invoice) {
       return res.status(404).json({
         success: false,
@@ -383,7 +378,7 @@ exports.verifyInvoicePayment = async (req, res) => {
 
     if (invoice.paymentStatus === "paid") {
       const escrow = invoice.escrowId
-        ? await Escrow.findById(invoice.escrowId)
+        ? await Escrow.findByPk(invoice.escrowId)
         : null;
       return res.status(200).json({
         success: true,
@@ -436,16 +431,12 @@ console.log("TX STATUS:", tx.transaction_status);
       });
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    const transactionDb = await sequelize.transaction();
 
     try {
-      const lockedInvoice = await Invoice.findById(invoice._id).session(
-        session,
-      );
+      const lockedInvoice = await Invoice.findByPk(invoice.id, { transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
       if (lockedInvoice.paymentStatus === "paid") {
-        await session.commitTransaction();
-        session.endSession();
+        await transactionDb.commit();
         return res.status(200).json({
           success: true,
           message: "Invoice payment already verified",
@@ -453,19 +444,17 @@ console.log("TX STATUS:", tx.transaction_status);
         });
       }
 
-      const quote = await Quote.findById(lockedInvoice.rfqId).session(session);
+      const quote = await Quote.findByPk(lockedInvoice.rfqId, { transaction: transactionDb });
       if (!quote) {
         const error = new Error("RFQ not found for invoice");
         error.statusCode = 404;
         throw error;
       }
 
-      let invoiceTransaction = await Transaction.findOne({
-        reference: transactionRef,
-      }).session(session);
+      let invoiceTransaction = await Transaction.findOne({ where: { reference: transactionRef }, transaction: transactionDb });
 
       if (!invoiceTransaction) {
-        invoiceTransaction = new Transaction({
+        invoiceTransaction = await Transaction.create({
           type: "invoice_payment",
           amount: lockedInvoice.amount,
             total: lockedInvoice.amount,
@@ -483,22 +472,17 @@ console.log("TX STATUS:", tx.transaction_status);
           providerReference: verification.providerReference,
           providerResponses: [verification.raw],
           metadata: {
-            invoiceId: lockedInvoice._id,
-            rfqId: quote._id,
+            invoiceId: lockedInvoice.id,
+            rfqId: quote.id,
             quoteNumber: quote.quote_number,
           },
-        });
-        await invoiceTransaction.save({ session });
+        }, { transaction: transactionDb });
       }
 
-      let escrow = await Escrow.findOne({
-        "metadata.invoice_id": lockedInvoice._id.toString(),
-      }).session(session);
+      let escrow = await Escrow.findOne({ where: sequelize.where(sequelize.json("metadata.invoice_id"), lockedInvoice.id.toString()), transaction: transactionDb });
 
       let escrowFundingTransaction = lockedInvoice.escrowFundingTransactionId
-        ? await Transaction.findById(
-            lockedInvoice.escrowFundingTransactionId,
-          ).session(session)
+        ? await Transaction.findByPk(lockedInvoice.escrowFundingTransactionId, { transaction: transactionDb })
         : null;
 
       if (!escrow) {
@@ -509,7 +493,7 @@ console.log("TX STATUS:", tx.transaction_status);
         const expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + 30);
 
-        escrowFundingTransaction = new Transaction({
+        escrowFundingTransaction = await Transaction.create({
           type: "escrow_funding",
           amount: lockedInvoice.amount,
           total: lockedInvoice.amount,
@@ -527,15 +511,14 @@ console.log("TX STATUS:", tx.transaction_status);
           providerReference: verification.providerReference,
           providerResponses: [verification.raw],
           metadata: {
-            invoiceId: lockedInvoice._id,
-            rfqId: quote._id,
+            invoiceId: lockedInvoice.id,
+            rfqId: quote.id,
             paymentReference: transactionRef,
             isInternalEscrowOperation: true,
           },
-        });
-        await escrowFundingTransaction.save({ session });
+        }, { transaction: transactionDb });
 
-        escrow = new Escrow({
+        escrow = await Escrow.create({
           creatorId: lockedInvoice.requesterId,
           recipientId: lockedInvoice.recipientId,
           amount: lockedInvoice.amount,
@@ -543,20 +526,19 @@ console.log("TX STATUS:", tx.transaction_status);
           currency: lockedInvoice.currency,
           status: "FUNDED",
           escrowUprn,
-          fundingTransactionId: escrowFundingTransaction._id,
+          fundingTransactionId: escrowFundingTransaction.id,
           conditions: `Escrow for RFQ #${quote.quote_number}`,
           description: lockedInvoice.description,
           expiryDate,
           metadata: {
-            quote_id: quote._id.toString(),
+            quote_id: quote.id.toString(),
             quote_number: quote.quote_number,
-            invoice_id: lockedInvoice._id.toString(),
+            invoice_id: lockedInvoice.id.toString(),
             paymentReference: transactionRef,
             squadRef: verification.providerReference,
             funded: true,
           },
-        });
-        await escrow.save({ session });
+        }, { transaction: transactionDb });
       }
 
       lockedInvoice.status = "paid";
@@ -564,16 +546,15 @@ console.log("TX STATUS:", tx.transaction_status);
       lockedInvoice.squadRef = verification.providerReference;
       lockedInvoice.paidAt = lockedInvoice.paidAt || new Date();
       lockedInvoice.verifiedAt = new Date();
-      lockedInvoice.fundingTransactionId = invoiceTransaction._id;
+      lockedInvoice.fundingTransactionId = invoiceTransaction.id;
       lockedInvoice.escrowFundingTransactionId =
-        escrowFundingTransaction?._id ||
+        escrowFundingTransaction?.id ||
         lockedInvoice.escrowFundingTransactionId;
-      lockedInvoice.escrowId = escrow._id;
+      lockedInvoice.escrowId = escrow.id;
       lockedInvoice.gatewayResponse = verification.raw;
-      await lockedInvoice.save({ session });
+      await lockedInvoice.save({ transaction: transactionDb });
 
-      await session.commitTransaction();
-      session.endSession();
+      await transactionDb.commit();
 
       return res.status(200).json({
         success: true,
@@ -588,8 +569,7 @@ console.log("TX STATUS:", tx.transaction_status);
         },
       });
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       throw error;
     }
   } catch (error) {
@@ -604,9 +584,7 @@ console.log("TX STATUS:", tx.transaction_status);
 
 exports.getInvoiceById = async (req, res) => {
   try {
-    const invoice = await Invoice.findById(req.params.invoiceId)
-      .populate("rfqId")
-      .populate("escrowId");
+    const invoice = await Invoice.findByPk(req.params.invoiceId, { include: [{ association: "rfq" }, Escrow] });
 
     if (!invoice) {
       return res.status(404).json({

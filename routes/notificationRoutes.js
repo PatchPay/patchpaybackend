@@ -37,7 +37,7 @@ router.post('/', authenticateToken, async (req, res) => {
 router.post('/recipient/:accountNumber', authenticateToken, async (req, res) => {
   try {
     const User = require('../models/User');
-    const recipient = await User.findOne({ bankAccount: req.params.accountNumber });
+    const recipient = await User.findOne({ where: { bankAccount: req.params.accountNumber } });
 
     if (!recipient) {
       return res.status(404).json({

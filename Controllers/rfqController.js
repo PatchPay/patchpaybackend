@@ -8,7 +8,8 @@ const {
   isCrossContinentalTransaction,
 } = require("../utils/transactionFeeUtils");
 const crypto = require("crypto");
-const mongoose = require("mongoose");
+const { Op } = require("sequelize");
+const sequelize = require("../config/database");
 const nodemailer = require("nodemailer");
 const Notification = require("../models/Notification");
 
@@ -90,20 +91,16 @@ const searchUser = async (req, res) => {
 
     switch (searchType) {
       case "email":
-        user = await User.findOne({ email: query }).select(requiredFields);
+        user = await User.findOne({ where: { email: query }, attributes: Object.keys(requiredFields) });
         break;
       case "phone":
-        user = await User.findOne({ phoneNumber: query }).select(
-          requiredFields,
-        );
+        user = await User.findOne({ where: { phoneNumber: query }, attributes: Object.keys(requiredFields) });
         break;
       case "id":
-        user = await User.findOne({ uniqueId: query }).select(requiredFields);
+        user = await User.findOne({ where: { uniqueId: query }, attributes: Object.keys(requiredFields) });
         break;
       case "name":
-        user = await User.findOne({
-          $or: [{ firstName: query }, { surname: query }],
-        }).select(requiredFields);
+        user = await User.findOne({ where: { [Op.or]: [{ firstName: query }, { surname: query }] }, attributes: Object.keys(requiredFields) });
         break;
       default:
         return res.status(400).json({
@@ -161,7 +158,7 @@ const createRFQ = async (req, res) => {
     // =========================
     // Validate users first
     // =========================
-    const recipient = await User.findById(recipientId);
+    const recipient = await User.findByPk(recipientId);
     if (!recipient) {
       return res.status(404).json({
         success: false,
@@ -176,7 +173,7 @@ const createRFQ = async (req, res) => {
       });
     }
 
-    const sender = await User.findById(req.user._id);
+    const sender = await User.findByPk(req.user.id);
     if (!sender) {
       return res.status(404).json({
         success: false,
@@ -282,7 +279,7 @@ const createRFQ = async (req, res) => {
       transaction_charges: numericTransaction,
       subtotal: subtotal || total,
 
-      proof_delivery: new mongoose.Types.ObjectId(),
+      proof_delivery: Date.now(),
       coupon: [],
 
       exchange_rate: exchangeRate,
@@ -429,9 +426,10 @@ const getQuotes = async (req, res) => {
 
     console.log("Current User ID:", userId);
 
-    const quotes = await Quote.find({
-      $or: [{ "user._id": userId }, { "destinatary_user._id": userId }],
-    }).sort({ createdAt: -1 });
+    const quotes = await Quote.findAll({
+      where: { [Op.or]: [sequelize.where(sequelize.json("user_data.id"), userId), sequelize.where(sequelize.json("destinatary_user.id"), userId)] },
+      order: [["createdAt", "DESC"]],
+    });
 
     console.log("Quotes Found:", quotes.length);
 
@@ -459,12 +457,9 @@ const cancelQuote = async (req, res) => {
     const { quoteId } = req.params;
     const userId = req.user._id;
 
-    // Find the quote and populate user details
-    console.log("STEP: before Quote.findById cancelQuote", { quoteId });
-    const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName surname email")
-      .populate("destinatary_user", "firstName surname email");
-    console.log("STEP: after Quote.findById cancelQuote", {
+    console.log("STEP: before quote lookup cancelQuote", { quoteId });
+    const quote = await Quote.findByPk(quoteId);
+    console.log("STEP: after quote lookup cancelQuote", {
       quoteFound: !!quote,
     });
 
@@ -601,12 +596,9 @@ const acceptQuote = async (req, res) => {
     const { quoteId } = req.params;
     const userId = req.user._id;
 
-    // Find the quote and populate user details
-    console.log("STEP: before Quote.findById acceptQuote", { quoteId });
-    const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName surname email")
-      .populate("destinatary_user", "firstName surname email");
-    console.log("STEP: after Quote.findById acceptQuote", {
+    console.log("STEP: before quote lookup acceptQuote", { quoteId });
+    const quote = await Quote.findByPk(quoteId);
+    console.log("STEP: after quote lookup acceptQuote", {
       quoteFound: !!quote,
     });
 
@@ -711,7 +703,7 @@ const acceptQuote = async (req, res) => {
       console.log("STEP: dispatch acceptance email in background", {
         quoteId: quote._id,
       });
-      User.findById(quote.user)
+      User.findByPk(quote.user)
         .then((issuer) => {
           if (!issuer?.email) {
             console.error("Acceptance email skipped: issuer email missing", {
@@ -763,12 +755,9 @@ const rejectQuote = async (req, res) => {
     const userId = req.user._id;
     const { reason } = req.body;
 
-    // Find the quote and populate user details
-    console.log("STEP: before Quote.findById rejectQuote", { quoteId });
-    const quote = await Quote.findById(quoteId)
-      .populate("user", "firstName surname email")
-      .populate("destinatary_user", "firstName surname email");
-    console.log("STEP: after Quote.findById rejectQuote", {
+    console.log("STEP: before quote lookup rejectQuote", { quoteId });
+    const quote = await Quote.findByPk(quoteId);
+    console.log("STEP: after quote lookup rejectQuote", {
       quoteFound: !!quote,
     });
 
@@ -870,7 +859,7 @@ const rejectQuote = async (req, res) => {
       console.log("STEP: dispatch rejection email in background", {
         quoteId: quote._id,
       });
-      User.findById(quote.user)
+      User.findByPk(quote.user)
         .then((issuer) => {
           if (!issuer?.email) {
             console.error("Rejection email skipped: issuer email missing", {
@@ -919,11 +908,7 @@ const checkQuoteNotifications = async () => {
     const now = new Date();
 
     // Find quotes that need response notification (72 hours)
-    const pendingQuotes = await Quote.find({
-      status: "Pending",
-      responseNotificationDue: { $lte: now },
-      notificationSent: false,
-    }).populate("user destinatary_user");
+    const pendingQuotes = await Quote.findAll({ where: { status: "Pending", responseNotificationDue: { [Op.lte]: now }, notificationSent: false } });
 
     for (const quote of pendingQuotes) {
       try {
@@ -954,14 +939,14 @@ const checkQuoteNotifications = async () => {
     }
 
     // Find quotes that are about to be deleted (13 days after response)
-    const quotesToDelete = await Quote.find({
-      status: { $in: ["Accepted", "Rejected"] },
+    const quotesToDelete = await Quote.findAll({ where: {
+      status: { [Op.in]: ["Accepted", "Rejected"] },
       updatedAt: {
-        $lte: new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000),
-        $gt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
+        [Op.lte]: new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000),
+        [Op.gt]: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
       },
-      deletionNotificationSent: { $ne: true },
-    }).populate("user destinatary_user");
+      deletionNotificationSent: { [Op.ne]: true },
+    } });
 
     for (const quote of quotesToDelete) {
       try {
@@ -1006,21 +991,16 @@ const checkQuoteNotifications = async () => {
     }
 
     // Delete quotes that are 14 days old after response
-    const deleteQuotes = await Quote.find({
-      status: { $in: ["Accepted", "Rejected"] },
-      updatedAt: { $lte: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) },
-    });
+    const deleteQuotes = await Quote.findAll({ where: { status: { [Op.in]: ["Accepted", "Rejected"] }, updatedAt: { [Op.lte]: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) } } });
 
     for (const quote of deleteQuotes) {
-      await Quote.findByIdAndDelete(quote._id);
-      await QuoteHistory.findOneAndUpdate(
-        { quote: quote._id },
-        {
+      await quote.destroy();
+      const history = await QuoteHistory.findOne({ where: { quote: quote.id } });
+      if (history) await history.update({
           status: "Deleted",
           action: "Automatic Deletion",
           deletedAt: now,
-        },
-      );
+      });
     }
   } catch (error) {
     console.error("Error in checkQuoteNotifications:", error);
@@ -1033,16 +1013,7 @@ const getQuoteById = async (req, res) => {
     const { quoteId } = req.params;
     const userId = req.user._id;
 
-    // Find the quote and populate user details
-    const quote = await Quote.findById(quoteId)
-      .populate(
-        "user",
-        "firstName surname organization email phoneNumber uniqueId address",
-      )
-      .populate(
-        "destinatary_user",
-        "firstName surname organization email phoneNumber uniqueId address",
-      );
+    const quote = await Quote.findByPk(quoteId);
 
     if (!quote) {
       return res.status(404).json({

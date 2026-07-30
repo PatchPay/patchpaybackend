@@ -1,77 +1,109 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const depositPaymentSchema = new mongoose.Schema({
-  // User who made the deposit
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
+const DepositPayment = sequelize.define(
+  "DepositPayment",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      primaryKey: true,
+    },
+
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "user_id",
+      references: {
+        model: "users",
+        key: "id",
+      },
+    },
+
+    amount: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      validate: {
+        min: 0,
+      },
+    },
+
+    currency: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "NGN",
+    },
+
+    transactionRef: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+      field: "transaction_ref",
+    },
+
+    squadRef: {
+      type: DataTypes.STRING,
+      unique: true,
+      allowNull: true,
+      field: "squad_ref",
+    },
+
+    status: {
+      type: DataTypes.ENUM(
+        "pending",
+        "successful",
+        "failed",
+        "reversed"
+      ),
+      defaultValue: "pending",
+    },
+
+    gatewayResponse: {
+      type: DataTypes.JSONB,
+      field: "gateway_response",
+    },
+
+    gatewayResponseCode: {
+      type: DataTypes.STRING,
+      field: "gateway_response_code",
+    },
+
+    transactionId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "transaction_id",
+      references: {
+        model: "transactions",
+        key: "id",
+      },
+    },
+
+    ipAddress: {
+      type: DataTypes.STRING,
+      field: "ip_address",
+    },
+
+    userAgent: {
+      type: DataTypes.TEXT,
+      field: "user_agent",
+    },
+
+    errorMessage: {
+      type: DataTypes.TEXT,
+      field: "error_message",
+    },
+
+    errorCode: {
+      type: DataTypes.STRING,
+      field: "error_code",
+    },
   },
-  
-  // Amount and currency
-  amount: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  currency: {
-    type: String,
-    required: true,
-    default: 'NGN'
-  },
-  
-  // Transaction references
-  transactionRef: {
-    type: String,
-    required: true,
-    index: { unique: true }
-  },
-  squadRef: {
-    type: String,
-    index: { unique: true, sparse: true }
-  },
-  
-  // Payment status
-  status: {
-    type: String,
-    enum: ['pending', 'successful', 'failed', 'reversed'],
-    default: 'pending'
-  },
-  
-  // Payment gateway data
-  gatewayResponse: {
-    type: Object
-  },
-  gatewayResponseCode: {
-    type: String
-  },
-  
-  // Transaction ID (after successful deposit)
-  transactionId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Transaction'
-  },
-  
-  // Metadata
-  ipAddress: {
-    type: String
-  },
-  userAgent: {
-    type: String
-  },
-  
-  // Error information
-  errorMessage: {
-    type: String
-  },
-  errorCode: {
-    type: String
+  {
+    tableName: "deposit_payments",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
   }
-}, { timestamps: true });
+);
 
-// Add indexes for faster querying
-depositPaymentSchema.index({ userId: 1, createdAt: -1 });
-depositPaymentSchema.index({ status: 1 });
-
-// Check if the model exists before creating it
-module.exports = mongoose.models.DepositPayment || mongoose.model('DepositPayment', depositPaymentSchema); 
+module.exports = DepositPayment;

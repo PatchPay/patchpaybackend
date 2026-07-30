@@ -6,13 +6,12 @@ exports.createAddress = async (req, res) => {
 
   try {
     // Create a new address entry
-    const newAddress = new Addresses({
+    const newAddress = await Addresses.create({
       user,
       addresses,
     });
 
     // Save the new address entry to the database
-    await newAddress.save();
     res.status(201).json({
       message: "Address added successfully",
       newAddress,
@@ -25,8 +24,8 @@ exports.createAddress = async (req, res) => {
 // Get all addresses linked to users
 exports.getAllAddresses = async (req, res) => {
   try {
-    // Retrieve all address entries and populate the user field
-    const addresses = await Addresses.find().populate("user");
+    // Retrieve all address entries with their related user.
+    const addresses = await Addresses.findAll({ include: [{ association: "User" }] });
     res.status(200).json(addresses);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -39,7 +38,7 @@ exports.getAddressesByUserId = async (req, res) => {
 
   try {
     // Find addresses for the specified user
-    const addresses = await Addresses.find({ user: userId }).populate("user");
+    const addresses = await Addresses.findAll({ where: { user: userId }, include: [{ association: "User" }] });
     if (!addresses || addresses.length === 0) {
       return res
         .status(404)
@@ -58,11 +57,8 @@ exports.updateAddress = async (req, res) => {
 
   try {
     // Update the specified address entry
-    const updatedAddress = await Addresses.findByIdAndUpdate(
-      addressId,
-      { addresses },
-      { new: true },
-    );
+    const updatedAddress = await Addresses.findByPk(addressId);
+    if (updatedAddress) await updatedAddress.update({ addresses });
     if (!updatedAddress) {
       return res.status(404).json({ message: "Address not found" });
     }
@@ -81,7 +77,8 @@ exports.deleteAddress = async (req, res) => {
 
   try {
     // Delete the specified address entry
-    const deletedAddress = await Addresses.findByIdAndDelete(addressId);
+    const deletedAddress = await Addresses.findByPk(addressId);
+    if (deletedAddress) await deletedAddress.destroy();
     if (!deletedAddress) {
       return res.status(404).json({ message: "Address not found" });
     }

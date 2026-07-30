@@ -3,12 +3,11 @@ const Escrow = require('../models/Escrow');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
-const mongoose = require('mongoose');
+const sequelize = require('../config/database');
 
 // Create a new escrow transaction
 exports.createTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     const { amount, type, metadata } = req.body;
@@ -16,30 +15,27 @@ exports.createTransaction = async (req, res) => {
     const userId = req.user._id; // From auth middleware
 
     // Get the escrow details
-    const escrow = await Escrow.findById(escrowId).session(session);
+    const escrow = await Escrow.findByPk(escrowId, { transaction: transactionDb });
     if (!escrow) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({ success: false, message: 'Escrow not found' });
     }
 
     // Get user's wallet
-    const userWallet = await Wallet.findOne({ 
-      userId: userId,
+    const userWallet = await Wallet.findOne({ where: {
+      userId,
       currency: escrow.currency,
-      isActive: true 
-    }).session(session);
+      isActive: true
+    }, transaction: transactionDb });
 
     if (!userWallet) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({ success: false, message: 'User wallet not found' });
     }
 
     // Check if user has sufficient balance
     if (userWallet.balance < amount) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
     }
 
@@ -54,28 +50,28 @@ exports.createTransaction = async (req, res) => {
     const transactionReference = `ESC-TXN-${timestamp}-${random}`;
 
     // Create wallet transaction
-    const walletTransaction = new Transaction({
+    const walletTransaction = await Transaction.create({
       type: 'transfer',
       amount: amount,
       fee: 0,
       total: amount,
       currency: escrow.currency,
       status: 'completed',
-      senderWallet: userWallet._id,
+      senderWallet: userWallet.id,
       senderId: userId,
       recipientId: escrow.recipientId,
       reference: transactionReference,
       description: `Escrow funding: ${escrow.escrowUprn}`,
       isUserAccountTransfer: true,
       metadata: {
-        escrowId: escrow._id,
+        escrowId: escrow.id,
         escrowUprn: escrow.escrowUprn,
         transactionType: 'ESCROW_FUND'
       }
-    });
+    }, { transaction: transactionDb });
 
     // Create the escrow transaction
-    const escrowTransaction = new EscrowTransaction({
+    const escrowTransaction = await EscrowTransaction.create({
       escrowId,
       userId,
       type,
@@ -90,51 +86,27 @@ exports.createTransaction = async (req, res) => {
         ...metadata,
         description: `${type} transaction for escrow ${escrow.escrowUprn}`
       }
-    });
+    }, { transaction: transactionDb });
 
     // Update wallet balance
-    await Wallet.findByIdAndUpdate(
-      userWallet._id,
-      { $inc: { balance: -amount } },
-      { session }
-    );
+    userWallet.balance -= Number(amount);
+    await userWallet.save({ transaction: transactionDb });
 
     // Update escrow balance and store the transaction reference
-    await Escrow.findByIdAndUpdate(
-      escrowId,
-      {
-        currentBalance: newBalance,
-        status: outstandingBalance === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED',
-        $push: {
-          transactionReferences: {
-            reference: transactionReference,
-            type: type,
-            amount: amount,
-            date: new Date()
-          }
-        }
-      },
-      { session }
-    );
+    await escrow.update({ currentBalance: newBalance, status: outstandingBalance === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED' }, { transaction: transactionDb });
 
     // Save both transactions
-    await walletTransaction.save({ session });
-    await escrowTransaction.save({ session });
-
-    // Commit the transaction
-    await session.commitTransaction();
-    session.endSession();
+    await transactionDb.commit();
 
     res.status(201).json({
       success: true,
       data: {
-        ...escrowTransaction.toObject(),
+        ...escrowTransaction.toJSON(),
         transactionReference
       }
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    await transactionDb.rollback();
     console.error('Error creating transaction:', error);
     res.status(500).json({
       success: false,
@@ -148,9 +120,7 @@ exports.createTransaction = async (req, res) => {
 exports.getEscrowTransactions = async (req, res) => {
   try {
     const { escrowId } = req.params;
-    const transactions = await EscrowTransaction.find({ escrowId })
-      .sort({ createdAt: -1 })
-      .populate('userId', 'firstName lastName email');
+    const transactions = await EscrowTransaction.findAll({ where: { escrowId }, include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }], order: [['createdAt', 'DESC']] });
 
     res.status(200).json({
       success: true,
@@ -170,9 +140,7 @@ exports.getEscrowTransactions = async (req, res) => {
 exports.getTransactionByReference = async (req, res) => {
   try {
     const { reference } = req.params;
-    const transaction = await EscrowTransaction.findOne({ transactionReference: reference })
-      .populate('userId', 'firstName lastName email')
-      .populate('escrowId');
+    const transaction = await EscrowTransaction.findOne({ where: { transactionReference: reference }, include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }, Escrow] });
 
     if (!transaction) {
       return res.status(404).json({
@@ -199,9 +167,7 @@ exports.getTransactionByReference = async (req, res) => {
 exports.getTransactionById = async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const transaction = await EscrowTransaction.findById(transactionId)
-      .populate('userId', 'firstName lastName email')
-      .populate('escrowId');
+    const transaction = await EscrowTransaction.findByPk(transactionId, { include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }, Escrow] });
 
     if (!transaction) {
       return res.status(404).json({
@@ -230,11 +196,8 @@ exports.updateTransactionStatus = async (req, res) => {
     const { transactionId } = req.params;
     const { status } = req.body;
 
-    const transaction = await EscrowTransaction.findByIdAndUpdate(
-      transactionId,
-      { status },
-      { new: true }
-    );
+    const transaction = await EscrowTransaction.findByPk(transactionId);
+    if (transaction) await transaction.update({ status });
 
     if (!transaction) {
       return res.status(404).json({

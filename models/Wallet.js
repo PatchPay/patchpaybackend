@@ -1,33 +1,52 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const walletSchema = new mongoose.Schema(
+const Wallet = sequelize.define(
+  "Wallet",
   {
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
+      primaryKey: true,
+    },
+
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "user_id",
+      references: {
+        model: "users",
+        key: "id",
+      },
     },
+
     accountType: {
-      type: String,
-      required: true,
-      enum: ["personal", "merchant", "ngo", "government"],
-      default: "personal",
+      type: DataTypes.ENUM(
+        "personal",
+        "merchant",
+        "ngo",
+        "government"
+      ),
+      allowNull: false,
+      defaultValue: "personal",
+      field: "account_type",
     },
+
     accountNumber: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING(50),
+      allowNull: false,
       unique: true,
+      field: "account_number",
     },
+
     balance: {
-      type: Number,
-      required: true,
-      default: 0,
-      min: 0,
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      defaultValue: 0,
     },
+
     currency: {
-      type: String,
-      required: true,
-      enum: [
+      type: DataTypes.ENUM(
         "NGN",
         "GHS",
         "KES",
@@ -41,7 +60,6 @@ const walletSchema = new mongoose.Schema(
         "XOF",
         "DZD",
         "MAD",
-
         "GBP",
         "EUR",
         "CHF",
@@ -49,11 +67,9 @@ const walletSchema = new mongoose.Schema(
         "NOK",
         "DKK",
         "PLN",
-
         "USD",
         "CAD",
         "MXN",
-
         "CNY",
         "JPY",
         "INR",
@@ -69,28 +85,29 @@ const walletSchema = new mongoose.Schema(
         "PKR",
         "PHP",
         "VND",
-
         "AUD",
         "NZD",
-
         "BRL",
         "ARS",
         "CLP",
         "COP",
-        "PEN",
-      ],
+        "PEN"
+      ),
+      allowNull: false,
     },
+
     isActive: {
-      type: Boolean,
-      default: true,
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+      field: "is_active",
     },
   },
-  { timestamps: true },
+  {
+    tableName: "wallets",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  }
 );
 
-// Create a compound index to ensure a user can have multiple wallets but only one per account type
-walletSchema.index({ userId: 1, accountType: 1 }, { unique: true });
-
-// Add a check to prevent model compilation errors
-module.exports =
-  mongoose.models.Wallet || mongoose.model("Wallet", walletSchema);
+module.exports = Wallet;

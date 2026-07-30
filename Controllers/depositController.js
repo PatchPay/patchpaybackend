@@ -28,15 +28,15 @@ exports.initiateDeposit = async (req, res) => {
     const transactionRef = `PP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
     // Create payment record
-    const payment = new DepositPayment({
-      userId: user._id,
+    const payment = await DepositPayment.create({
+      userId: user.id,
       amount,
       currency: "NGN",
       transactionRef,
       status: "pending",
     });
 
-    await payment.save();
+ 
 
     // Create Squad payment session
     const squadApiUrl =
@@ -72,7 +72,7 @@ exports.initiateDeposit = async (req, res) => {
       //   phone: user.phoneNumber,
       // },
       metadata: {
-        userId: user._id.toString(),
+        userId: user.id.toString(),
         paymentType: "deposit",
       },
     };
@@ -186,9 +186,11 @@ exports.handleWebhook = async (req, res) => {
     const { transaction_ref, amount, customer, currency } = event.data;
 
     // Find the payment
-    const payment = await DepositPayment.findOne({
+    const payment = await DepositPayment.findOne({ 
+      where:
+      {
       transactionRef: transaction_ref,
-    });
+    }});
 
     if (!payment) {
       console.error(
@@ -208,12 +210,12 @@ exports.handleWebhook = async (req, res) => {
 
     // Update payment status
     payment.status = "successful";
-    payment.squadRef = event.data.transaction_id || "";
+    payment.squadRef = event.data.transactionid || "";
     payment.gatewayResponse = event.data;
     payment.gatewayResponseCode = event.data.response_code || "";
 
     // Find user's wallet
-    const wallet = await Wallet.findOne({ userId: payment.userId });
+    const wallet = await Wallet.findOne({where:{ userId: payment.userId }});
 
     if (!wallet) {
       payment.errorMessage = "User wallet not found";
@@ -229,7 +231,7 @@ exports.handleWebhook = async (req, res) => {
       amount: payment.amount,
       currency: payment.currency,
       status: "completed",
-      recipientWallet: wallet._id,
+      recipientWallet: wallet.id,
       recipientId: payment.userId,
       reference: payment.transactionRef,
       description: "Deposit via Squad payment gateway",
@@ -243,7 +245,7 @@ exports.handleWebhook = async (req, res) => {
     await wallet.save();
 
     // Update payment with transaction ID
-    payment.transactionId = transaction._id;
+    payment.transactionId = transaction.id;
     await payment.save();
 
     console.log(
@@ -354,7 +356,7 @@ exports.verifyDeposit = async (req, res) => {
     }
 
     // Find the payment
-    const payment = await DepositPayment.findOne({ transactionRef });
+    const payment = await DepositPayment.findOne({where :{ transactionRef }});
 
     if (!payment) {
       return res.status(404).json({
@@ -367,7 +369,7 @@ exports.verifyDeposit = async (req, res) => {
     if (payment.status === "successful") {
       // Get transaction details
       const transaction = payment.transactionId
-        ? await Transaction.findById(payment.transactionId)
+        ? await Transaction.findByPk(payment.transactionId)
         : null;
 
       return res.status(200).json({
@@ -375,7 +377,7 @@ exports.verifyDeposit = async (req, res) => {
         message: "Payment already verified",
         data: {
           payment: {
-            id: payment._id,
+            id: payment.id,
             amount: payment.amount,
             currency: payment.currency,
             status: payment.status,
@@ -384,7 +386,7 @@ exports.verifyDeposit = async (req, res) => {
           },
           transaction: transaction
             ? {
-                id: transaction._id,
+                id: transaction.id,
                 amount: transaction.amount,
                 type: transaction.type,
                 status: transaction.status,
@@ -431,7 +433,12 @@ exports.verifyDeposit = async (req, res) => {
         payment.squadRef = response.data.data.transaction_ref || "";
 
         // Find user's wallet
-        const wallet = await Wallet.findOne({ userId: payment.userId });
+        const wallet = await Wallet.findOne(
+          {
+            where: 
+            { userId: payment.userId }
+          }
+        );
 
         if (!wallet) {
           payment.errorMessage = "User wallet not found";
@@ -444,33 +451,41 @@ exports.verifyDeposit = async (req, res) => {
         }
 
         // Check if transaction already exists
-        let transaction = await Transaction.findOne({
+        let transaction = await Transaction.findOne(
+          {
+            where:  {
           reference: payment.transactionRef,
-        });
+        }
+          }
+         
+      );
 
         if (!transaction) {
           // Create transaction
-          transaction = new Transaction({
+          transaction = await Transaction.create({
             type: "deposit",
             amount: payment.amount,
             currency: payment.currency,
             status: "completed",
-            recipientWallet: wallet._id,
+            recipientWallet: wallet.id,
             recipientId: payment.userId,
             reference: payment.transactionRef,
             description: "Deposit via Squad payment gateway",
             externalReference: payment.squadRef,
           });
 
-          await transaction.save();
+        
 
           // Add amount to wallet
-          wallet.balance += payment.amount;
-          await wallet.save();
+        wallet.balance =
+  parseFloat(wallet.balance) + parseFloat(payment.amount);
+
+await wallet.save();
+        
         }
 
         // Update payment with transaction ID
-        payment.transactionId = transaction._id;
+        payment.transactionId = transaction.id;
         await payment.save();
 
         return res.status(200).json({
@@ -478,20 +493,20 @@ exports.verifyDeposit = async (req, res) => {
           message: "Payment verified successfully",
           data: {
             payment: {
-              id: payment._id,
+              id: payment.id,
               amount: payment.amount,
               currency: payment.currency,
               status: payment.status,
               transactionRef: payment.transactionRef,
-              createdAt: payment.createdAt,
+              createdAt: payment.created_at,
             },
             transaction: {
-              id: transaction._id,
+              id: transaction.id,
               amount: transaction.amount,
               type: transaction.type,
               status: transaction.status,
               reference: transaction.reference,
-              createdAt: transaction.createdAt,
+              createdAt: transaction.created_at,
             },
           },
         });
@@ -536,18 +551,23 @@ exports.verifyDeposit = async (req, res) => {
  */
 exports.getDepositHistory = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
     const limit = parseInt(req.query.limit) || 10;
     const skip = parseInt(req.query.skip) || 0;
 
     // Find all deposits for this user
-    const deposits = await DepositPayment.find({ userId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    const deposits = await DepositPayment.findAll({
+  where: { userId },
+  order: [["created_at", "DESC"]],
+  offset: skip,
+  limit
+});
 
     // Get total count
-    const total = await DepositPayment.countDocuments({ userId });
+    const total = await DepositPayment.count({
+      where:
+      { userId }
+    });
 
     // Map to a nicer format
     const formattedDeposits = await Promise.all(
@@ -555,11 +575,11 @@ exports.getDepositHistory = async (req, res) => {
         let transaction = null;
 
         if (deposit.transactionId) {
-          transaction = await Transaction.findById(deposit.transactionId);
+          transaction = await Transaction.findByPk(deposit.transactionId);
         }
 
         return {
-          id: deposit._id,
+          id: deposit.id,
           amount: deposit.amount,
           currency: deposit.currency,
           status: deposit.status,
@@ -567,7 +587,7 @@ exports.getDepositHistory = async (req, res) => {
           createdAt: deposit.createdAt,
           transaction: transaction
             ? {
-                id: transaction._id,
+                id: transaction.id,
                 status: transaction.status,
                 reference: transaction.reference,
               }

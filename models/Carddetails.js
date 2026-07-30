@@ -1,39 +1,31 @@
-const mongoose = require('mongoose');
-const Schema = mongoose.Schema;
+const { DataTypes } = require("sequelize"); 
+const sequelize = require("../config/database");
+const CardDetails = sequelize.define
+("CardDetails", 
+    
+    { 
+    id: { 
+    type: DataTypes.INTEGER, 
+    primaryKey: true, 
+    autoIncrement: true
 
-const cardDetailsSchema = new Schema({
-  card_number: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  card_holder_name: {
-    type: String,
-    required: true
-  },
-  expiry_date: {
-    type: Date,
-    required: true
-  },
-  cvv: {
-    type: String,
-    required: true
-  },
-  billing_address: {
-    type: String,
-    required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
+     }, 
 
-// Create the model
-const CardDetails = mongoose.model('CardDetails', cardDetailsSchema);
+    card_number: {
+         type: DataTypes.STRING, 
+         allowNull: false, 
+         unique: true
+         }, 
 
-module.exports = CardDetails;
+    card_holder_name:
+     { type: DataTypes.STRING,
+         allowNull: false 
+        }, 
+    expiry_date: { type: DataTypes.DATE, allowNull: false }, 
+    cvv: { type: DataTypes.STRING, allowNull: false }, 
+    billing_address: { type: DataTypes.STRING, allowNull: false }
+
+
+
+},
+     { tableName: "card_details", underscored: true, timestamps: true }); CardDetails.associate = () => {}; module.exports = CardDetails;

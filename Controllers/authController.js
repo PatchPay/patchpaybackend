@@ -9,7 +9,7 @@ const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -35,12 +35,12 @@ const loginUser = async (req, res) => {
     }
 
     // Check if the user has a wallet, create one if not
-    const existingWallet = await Wallet.findOne({ userId: user._id });
+    const existingWallet = await Wallet.findOne({ where: { userId: user.id } });
     if (!existingWallet) {
       console.log(`User ${user._id} doesn't have a wallet, creating one...`);
       
       // CHANGE: Get user data from database to determine proper currency
-      const userData = await User.findById(user._id);
+      const userData = await User.findByPk(user.id);
       if (!userData.country || !userData.countryCode) {
         return res.status(400).json({ 
           message: 'Cannot initialize wallet: Your profile is missing country information. Please update your profile.' 
@@ -67,8 +67,8 @@ const loginUser = async (req, res) => {
       }
       
       // Create new wallet with proper currency from user data
-      const wallet = new Wallet({
-        userId: user._id,
+      const wallet = await Wallet.create({
+        userId: user.id,
         accountNumber,
         balance: 0,
         currency, // Use determined currency instead of hardcoded 'NGN'
@@ -76,7 +76,6 @@ const loginUser = async (req, res) => {
         accountType: 'personal'
       });
       
-      await wallet.save();
       console.log(`Wallet created for user ${user._id} with account number ${accountNumber} and currency ${currency}`);
     } else {
       // Check if existing wallet has accountType field, add it if missing
@@ -130,7 +129,7 @@ const registerUser = async (req, res) => {
     const { email, password, firstName, lastName, phoneNumber } = req.body;
 
     // Check if user exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -146,7 +145,7 @@ const registerUser = async (req, res) => {
     const uniqueId = Math.random().toString(36).substr(2, 9).toUpperCase();
 
     // Create user
-    const user = new User({
+    const user = await User.create({
       email,
       password: hashedPassword,
       firstName,
@@ -156,7 +155,6 @@ const registerUser = async (req, res) => {
       status: 'Active'
     });
 
-    await user.save();
 
     // Generate token with 2-hour expiration
     const token = jwt.sign(
