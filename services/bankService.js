@@ -15,32 +15,17 @@ exports.syncBanksFromSquad = async () => {
       return [];
     }
 
-    const bulkOps = banks.map((bank) => {
+    const bankRecords = banks.map((bank) => {
       const bankCode = String(bank.bank_code || bank.code || bank.bankCode || "").trim();
       const bankName = String(bank.bank_name || bank.name || bank.bankName || "").trim();
-      return {
-        updateOne: {
-          filter: { bankCode },
-          update: {
-            $set: {
-              bankCode,
-              name: bankName,
-              country: bank.country || "NG",
-              active: bank.isActive !== false,
-              raw: bank,
-              lastSyncedAt: new Date(),
-            },
-          },
-          upsert: true,
-        },
-      };
+      return { bankCode, name: bankName, country: bank.country || "NG", active: bank.isActive !== false, raw: bank, lastSyncedAt: new Date() };
     });
 
-    if (bulkOps.length > 0) {
-      await Bank.bulkWrite(bulkOps, { ordered: false });
+    if (bankRecords.length > 0) {
+      await Promise.all(bankRecords.map((bank) => Bank.upsert(bank)));
     }
 
-    return await Bank.find({}).lean();
+    return Bank.findAll();
   } catch (error) {
     console.error("Bank sync error:", error.response?.data || error.message || error);
     throw error;
@@ -48,7 +33,7 @@ exports.syncBanksFromSquad = async () => {
 };
 
 exports.getBanks = async ({ forceRefresh = false } = {}) => {
-  const latestBank = await Bank.findOne({}).sort({ lastSyncedAt: -1 });
+  const latestBank = await Bank.findOne({ order: [["lastSyncedAt", "DESC"]] });
   const shouldRefresh =
     forceRefresh ||
     !latestBank ||
@@ -62,10 +47,10 @@ exports.getBanks = async ({ forceRefresh = false } = {}) => {
     }
   }
 
-  return Bank.find({ active: true }).sort({ name: 1 }).lean();
+  return Bank.findAll({ where: { active: true }, order: [["name", "ASC"]] });
 };
 
 exports.getBankByCode = async (bankCode) => {
   if (!bankCode) return null;
-  return Bank.findOne({ bankCode: String(bankCode).trim() }).lean();
+  return Bank.findOne({ where: { bankCode: String(bankCode).trim() } });
 };

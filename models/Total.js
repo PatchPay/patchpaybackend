@@ -1,26 +1,5 @@
-const mongoose = require('mongoose');
-const Schema = mongoose.Schema;
-
-const totalSchema = new Schema({
-  value: {
-    type: Number,
-    required: true
-  },
-  currency: {
-    type: String,
-    required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-// Create the model
-const Total = mongoose.model('Total', totalSchema);
-
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+const Total = sequelize.define("Total", { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, value: { type: DataTypes.FLOAT, allowNull: false }, currency: { type: DataTypes.STRING, allowNull: false } }, { tableName: "totals", underscored: true, timestamps: true });
+Total.associate = (models) => { Total.hasMany(models.FinancialData, { foreignKey: "total_national" }); Total.hasMany(models.FinancialData, { foreignKey: "total_international" }); };
 module.exports = Total;

@@ -2,7 +2,7 @@ const WithdrawalPayment = require("../models/WithdrawalPayment");
 const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const User = require("../models/User");
-const mongoose = require("mongoose");
+
 const bankService = require("../services/bankService");
 const squadApi = require("../utils/squadApiUtils");
 const transferService = require("../services/transfer.service");
@@ -45,7 +45,7 @@ exports.initiateWithdrawal = async (req, res) => {
       success: true,
       data: {
         withdrawal: {
-          id: withdrawal._id,
+          id: withdrawal.id,
           transactionRef: withdrawal.transactionRef,
           squadRef: withdrawal.squadRef,
           amount: withdrawal.amount,
@@ -54,7 +54,7 @@ exports.initiateWithdrawal = async (req, res) => {
         },
         transaction: transaction
           ? {
-              id: transaction._id,
+              id: transaction.id,
               reference: transaction.reference,
               amount: transaction.amount,
               currency: transaction.currency,
@@ -69,6 +69,7 @@ exports.initiateWithdrawal = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to initiate withdrawal",
+          stack: error.stack,
     });
   }
 };
@@ -219,30 +220,35 @@ exports.resolveAccount = async (req, res) => {
  */
 exports.getWithdrawalHistory = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
     // Count total documents for pagination
-    const total = await WithdrawalPayment.countDocuments({ userId });
+    const total = await WithdrawalPayment.count({
+      where: 
+      { userId }}
+    );
 
     // Get withdrawals with pagination
-    const withdrawals = await WithdrawalPayment.find({ userId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+  const withdrawals = await WithdrawalPayment.findAll({
+  where: { userId },
+  order: [["created_at", "DESC"]],
+  offset: skip,
+  limit,
+});
 
     // Format withdrawals for response
     const formattedWithdrawals = withdrawals.map((withdrawal) => ({
-      id: withdrawal._id,
+      id: withdrawal.id,
       amount: withdrawal.amount,
       currency: withdrawal.currency,
       account_number: withdrawal.account_number,
       accountName: withdrawal.accountName,
       status: withdrawal.status,
       transactionRef: withdrawal.transactionRef,
-      createdAt: withdrawal.createdAt,
+      createdAt: withdrawal.created_at,
     }));
 
     return res.status(200).json({

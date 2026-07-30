@@ -2,7 +2,8 @@ const Escrow = require('../models/Escrow');
 const Quote = require('../models/Quote');
 const Payment = require('../models/Payment');
 const User = require('../models/User');
-const mongoose = require('mongoose');
+const sequelize = require('../config/database');
+const { Op } = require('sequelize');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const { formatAmount } = require('../utils/accountUtils');
@@ -15,17 +16,15 @@ const { ApiError } = require('../utils/ApiError');
 
 // Create a new escrow from a quote
 const createEscrow = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     const { quote_id } = req.body;
 
     // Find the quote
-    const quote = await Quote.findById(quote_id).session(session);
+    const quote = await Quote.findByPk(quote_id, { transaction: transactionDb });
     if (!quote) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({
         success: false,
         message: 'Quote not found'
@@ -34,8 +33,7 @@ const createEscrow = async (req, res) => {
 
     // Verify quote status is 'Accepted'
     if (quote.status !== 'Accepted') {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Can only create escrow for accepted quotes'
@@ -43,13 +41,10 @@ const createEscrow = async (req, res) => {
     }
 
     // Check if escrow already exists for this quote
-    const existingEscrow = await Escrow.findOne({ 
-      metadata: { quote_id: quote._id }
-    }).session(session);
+    const existingEscrow = await Escrow.findOne({ where: sequelize.where(sequelize.json('metadata.quote_id'), String(quote.id)), transaction: transactionDb });
 
     if (existingEscrow) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Escrow already exists for this quote'
@@ -64,7 +59,7 @@ const createEscrow = async (req, res) => {
     expiryDate.setDate(expiryDate.getDate() + 30);
 
     // Create the escrow
-    const escrow = new Escrow({
+    const escrow = await Escrow.create({
       creatorId: quote.user,
       recipientId: quote.destinatary_user,
       amount: quote.total, // Use the quote's total amount
@@ -74,7 +69,7 @@ const createEscrow = async (req, res) => {
       description: quote.product_description,
       expiryDate, // Add expiry date
       metadata: {
-        quote_id: quote._id,
+        quote_id: quote.id,
         quote_number: quote.quote_number,
         product_quantity: quote.product_quantity,
         delivery_type: quote.delivery_type,
@@ -86,21 +81,15 @@ const createEscrow = async (req, res) => {
         subtotal: quote.subtotal,
         exchange_rate: quote.exchange_rate
       }
-    });
-
-    await escrow.save({ session });
-
-    // Commit the transaction
-    await session.commitTransaction();
-    session.endSession();
+    }, { transaction: transactionDb });
+    await transactionDb.commit();
 
     res.status(201).json({
       success: true,
       data: escrow
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    await transactionDb.rollback();
     
     console.error('Error creating escrow:', error);
     res.status(500).json({
@@ -124,7 +113,7 @@ const getEscrows = async (req, res) => {
     } else if (role === 'recipient') {
       query.recipientId = userId;
     } else {
-      query.$or = [{ creatorId: userId }, { recipientId: userId }];
+      query[Op.or] = [{ creatorId: userId }, { recipientId: userId }];
     }
 
     // Filter by status if specified
@@ -132,22 +121,18 @@ const getEscrows = async (req, res) => {
       query.status = status;
     }
 
-    const escrows = await Escrow.find(query)
-      .populate('creatorId', 'firstName surname email')
-      .populate('recipientId', 'firstName surname email')
-      .sort({ createdAt: -1 });
+    const escrows = await Escrow.findAll({ where: query, include: [{ association: 'creator', attributes: ['firstName', 'surname', 'email'] }, { association: 'recipient', attributes: ['firstName', 'surname', 'email'] }], order: [['createdAt', 'DESC']] });
 
     // Fetch associated quotes for each escrow
     const escrowsWithQuotes = await Promise.all(escrows.map(async (escrow) => {
       if (escrow.metadata && escrow.metadata.quote_id) {
-        const quote = await Quote.findById(escrow.metadata.quote_id)
-          .select('quote_number status total currency');
+        const quote = await Quote.findByPk(escrow.metadata.quote_id, { attributes: ['quote_number', 'status', 'total', 'currency'] });
         return {
-          ...escrow.toObject(),
-          quote: quote ? quote.toObject() : null
+          ...escrow.toJSON(),
+          quote: quote ? quote.toJSON() : null
         };
       }
-      return escrow.toObject();
+      return escrow.toJSON();
     }));
 
     res.json({
@@ -170,15 +155,10 @@ const getMyEscrows = async (req, res) => {
     const userId = req.user._id;
 
 
-    const escrows = await Escrow.find({
-      $or: [
+    const escrows = await Escrow.findAll({ where: { [Op.or]: [
         { creatorId: userId },
         { recipientId: userId }
-      ]
-    })
-    .populate("creatorId", "firstName lastName email phoneNumber")
-    .populate("recipientId", "firstName lastName email phoneNumber")
-    .sort({ createdAt: -1 });
+      ] }, include: [{ association: 'creator', attributes: ['firstName', 'lastName', 'email', 'phoneNumber'] }, { association: 'recipient', attributes: ['firstName', 'lastName', 'email', 'phoneNumber'] }], order: [['createdAt', 'DESC']] });
 
 
     res.status(200).json({
@@ -202,12 +182,7 @@ const getMyEscrows = async (req, res) => {
 // Get a single escrow by ID
 const getEscrowById = async (req, res) => {
   try {
-    const escrow = await Escrow.findById(req.params.id)
-      .populate('creatorId', 'firstName lastName email')
-      .populate('recipientId', 'firstName lastName email')
-      .populate('fundingTransactionId')
-      .populate('releaseTransactionId')
-      .populate('refundTransactionId');
+    const escrow = await Escrow.findByPk(req.params.id, { include: [{ association: 'creator' }, { association: 'recipient' }, { association: 'fundingTransaction' }, { association: 'releaseTransaction' }, { association: 'refundTransaction' }] });
 
     if (!escrow) {
       return res.status(404).json({
@@ -219,15 +194,14 @@ const getEscrowById = async (req, res) => {
     // Fetch associated quote if it exists
     let quote = null;
     if (escrow.metadata && escrow.metadata.quote_id) {
-      quote = await Quote.findById(escrow.metadata.quote_id)
-        .select('quote_number status total currency product_description delivery_type trade_type');
+      quote = await Quote.findByPk(escrow.metadata.quote_id, { attributes: ['quote_number', 'status', 'total', 'currency', 'product_description', 'delivery_type', 'trade_type'] });
     }
 
     res.json({
       success: true,
       data: {
-        ...escrow.toObject(),
-        quote: quote ? quote.toObject() : null
+        ...escrow.toJSON(),
+        quote: quote ? quote.toJSON() : null
       }
     });
   } catch (error) {
@@ -241,16 +215,14 @@ const getEscrowById = async (req, res) => {
 
 // Fund an escrow
 const fundEscrow = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     const { transactionId } = req.body;
-    const escrow = await Escrow.findById(req.params.id).session(session);
+    const escrow = await Escrow.findByPk(req.params.id, { transaction: transactionDb });
 
     if (!escrow) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({
         success: false,
         message: 'Escrow not found'
@@ -258,8 +230,7 @@ const fundEscrow = async (req, res) => {
     }
 
     if (escrow.status !== 'created') {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Escrow cannot be funded in its current state'
@@ -267,10 +238,9 @@ const fundEscrow = async (req, res) => {
     }
 
     // Verify the transaction amount matches the escrow amount
-    const transaction = await Transaction.findById(transactionId).session(session);
+    const transaction = await Transaction.findByPk(transactionId, { transaction: transactionDb });
     if (!transaction) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({
         success: false,
         message: 'Transaction not found'
@@ -278,8 +248,7 @@ const fundEscrow = async (req, res) => {
     }
 
     if (transaction.amount !== escrow.amount) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Transaction amount does not match escrow amount'
@@ -288,27 +257,25 @@ const fundEscrow = async (req, res) => {
 
     escrow.status = 'funded';
     escrow.fundingTransactionId = transactionId;
-    await escrow.save({ session });
+    await escrow.save({ transaction: transactionDb });
 
     // If this escrow is linked to a quote, update the quote status
     if (escrow.metadata && escrow.metadata.quote_id) {
-      const quote = await Quote.findById(escrow.metadata.quote_id).session(session);
+      const quote = await Quote.findByPk(escrow.metadata.quote_id, { transaction: transactionDb });
       if (quote) {
         quote.status = 'Funded';
-        await quote.save({ session });
+        await quote.save({ transaction: transactionDb });
       }
     }
 
-    await session.commitTransaction();
-    session.endSession();
+    await transactionDb.commit();
 
     res.json({
       success: true,
       data: escrow
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    await transactionDb.rollback();
     
     console.error('Error funding escrow:', error);
     res.status(500).json({
@@ -320,16 +287,14 @@ const fundEscrow = async (req, res) => {
 
 // Release escrow funds
 const releaseEscrow = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     const { transactionId } = req.body;
-    const escrow = await Escrow.findById(req.params.id).session(session);
+    const escrow = await Escrow.findByPk(req.params.id, { transaction: transactionDb });
 
     if (!escrow) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({
         success: false,
         message: 'Escrow not found'
@@ -337,8 +302,7 @@ const releaseEscrow = async (req, res) => {
     }
 
     if (escrow.status !== 'funded') {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Escrow cannot be released in its current state'
@@ -346,10 +310,9 @@ const releaseEscrow = async (req, res) => {
     }
 
     // Verify the transaction
-    const transaction = await Transaction.findById(transactionId).session(session);
+    const transaction = await Transaction.findByPk(transactionId, { transaction: transactionDb });
     if (!transaction) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(404).json({
         success: false,
         message: 'Transaction not found'
@@ -357,8 +320,7 @@ const releaseEscrow = async (req, res) => {
     }
 
     if (transaction.amount !== escrow.amount) {
-      await session.abortTransaction();
-      session.endSession();
+      await transactionDb.rollback();
       return res.status(400).json({
         success: false,
         message: 'Transaction amount does not match escrow amount'
@@ -367,27 +329,25 @@ const releaseEscrow = async (req, res) => {
 
     escrow.status = 'released';
     escrow.releaseTransactionId = transactionId;
-    await escrow.save({ session });
+    await escrow.save({ transaction: transactionDb });
 
     // If this escrow is linked to a quote, update the quote status
     if (escrow.metadata && escrow.metadata.quote_id) {
-      const quote = await Quote.findById(escrow.metadata.quote_id).session(session);
+      const quote = await Quote.findByPk(escrow.metadata.quote_id, { transaction: transactionDb });
       if (quote) {
         quote.status = 'Completed';
-        await quote.save({ session });
+        await quote.save({ transaction: transactionDb });
       }
     }
 
-    await session.commitTransaction();
-    session.endSession();
+    await transactionDb.commit();
 
     res.json({
       success: true,
       data: escrow
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    await transactionDb.rollback();
     
     console.error('Error releasing escrow:', error);
     res.status(500).json({
@@ -401,7 +361,7 @@ const releaseEscrow = async (req, res) => {
 const refundEscrow = async (req, res) => {
   try {
     const { transactionId } = req.body;
-    const escrow = await Escrow.findById(req.params.id);
+    const escrow = await Escrow.findByPk(req.params.id);
 
     if (!escrow) {
       return res.status(404).json({
@@ -438,7 +398,7 @@ const refundEscrow = async (req, res) => {
 const disputeEscrow = async (req, res) => {
   try {
     const { reason } = req.body;
-    const escrow = await Escrow.findById(req.params.id);
+    const escrow = await Escrow.findByPk(req.params.id);
 
     if (!escrow) {
       return res.status(404).json({
@@ -474,7 +434,7 @@ const disputeEscrow = async (req, res) => {
 // Cancel an escrow
 const cancelEscrow = async (req, res) => {
   try {
-    const escrow = await Escrow.findById(req.params.id);
+    const escrow = await Escrow.findByPk(req.params.id);
 
     if (!escrow) {
       return res.status(404).json({

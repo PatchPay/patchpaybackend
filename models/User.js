@@ -1,149 +1,135 @@
-const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const userSchema = new Schema({
-  // Account type
-  accountType: {
-    type: String,
-    enum: ["Personal", "Merchant"],
-    required: true,
-  },
+const User = sequelize.define(
+  "User",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
 
-  // Status
-  status_client: {
-    type: String,
-    enum: ["Active", "Inactive"],
-    default: "Inactive",
-  },
+    accountType: {
+      field: "account_type",
+      type: DataTypes.ENUM("Personal", "Merchant"),
+      allowNull: false,
+    },
 
-  // Common fields
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-  },
+    statusClient: {
+      field: "status_client",
+      type: DataTypes.ENUM("Active", "Inactive"),
+      defaultValue: "Inactive",
+    },
 
-  password: {
-    type: String,
-    required: true,
-  },
+    email: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
 
-  transactionPinHash: {
-    type: String,
-    select: false,
-  },
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
 
-  hasTransactionPin: {
-    type: Boolean,
-    default: false,
-  },
+    transactionPinHash: {
+      field: "transaction_pin_hash",
+      type: DataTypes.STRING,
+    },
 
-  country: {
-    type: String,
-    required: true,
-  },
-  countryCode: {
-    type: String,
-    required: true,
-    uppercase: true,
-  },
+    resetPasswordOtp: {
+      field: "reset_password_otp",
+  type: DataTypes.STRING,
+  allowNull: true,
+},
 
-  phoneNumber: {
-    type: String,
-    required: function () {
-      return this.accountType === "Personal";
+    hasTransactionPin: {
+      field: "has_transaction_pin",
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+
+    country: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+
+    countryCode: {
+      field: "country_code",
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+
+    phoneNumber: {
+      field: "phone_number",
+      type: DataTypes.STRING,
+    },
+
+    emailVerified: {
+      field: "email_verified",
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+
+    otp: {
+      type: DataTypes.STRING,
+    },
+
+    otpExpires: {
+      field: "otp_expires",
+      type: DataTypes.DATE,
+    },
+
+    resetPasswordToken: {
+      field: "reset_password_token",
+      type: DataTypes.STRING,
+    },
+
+    resetPasswordExpires: {
+      field: "reset_password_expires",
+      type: DataTypes.DATE,
+    },
+
+    notification: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+
+    firstName: {
+      field: "first_name",
+      type: DataTypes.STRING,
+    },
+
+    middleName: {
+      field: "middle_name",
+      type: DataTypes.STRING,
+    },
+
+    surname: {
+      type: DataTypes.STRING,
+    },
+
+    businessName: {
+      field: "business_name",
+      type: DataTypes.STRING,
+    },
+
+    industry: {
+      type: DataTypes.STRING,
+    },
+
+    companyAddress: {
+      field: "company_address",
+      type: DataTypes.TEXT,
     },
   },
-
-  // Email verification
-  emailVerified: {
-    type: Boolean,
-    default: false,
-  },
-
-  otp: {
-    type: String,
-    default: null,
-  },
-
-  otpExpires: {
-    type: Date,
-    default: null,
-  },
-
-  resetPasswordToken: {
-    type: String,
-    default: "",
-  },
-
-  resetPasswordExpires: {
-    type: Date,
-    default: null,
-  },
-
-  notification: {
-    type: Boolean,
-    default: false,
-  },
-
-  // -------- Personal Fields --------
-  firstName: {
-    type: String,
-    required: function () {
-      return this.accountType === "Personal";
-    },
-  },
-
-  middleName: {
-    type: String,
-  },
-
-  surname: {
-    type: String,
-    required: function () {
-      return this.accountType === "Personal";
-    },
-  },
-
-  // -------- Merchant Fields --------
-  businessName: {
-    type: String,
-    required: function () {
-      return this.accountType === "Merchant";
-    },
-  },
-
-  industry: {
-    type: String,
-    required: function () {
-      return this.accountType === "Merchant";
-    },
-  },
-
-  companyAddress: {
-    type: String,
-    required: function () {
-      return this.accountType === "Merchant";
-    },
-  },
-
-  // timestamps
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
-
-userSchema.pre("save", function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
-
-const User = mongoose.model("User", userSchema);
+  {
+    tableName: "users",
+    timestamps: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+  }
+);
 
 module.exports = User;

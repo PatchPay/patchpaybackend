@@ -7,7 +7,7 @@ exports.createCardDetail = async (req, res) => {
 
   try {
     // Create a new CardDetails entry
-    const newCardDetail = new CardDetails({
+    const newCardDetail = await CardDetails.create({
       card_number,
       card_holder_name,
       expiry_date,
@@ -16,7 +16,6 @@ exports.createCardDetail = async (req, res) => {
     });
 
     // Save the new CardDetails entry to the database
-    await newCardDetail.save();
     res.status(201).json({
       message: "Card details created successfully",
       newCardDetail,
@@ -30,7 +29,7 @@ exports.createCardDetail = async (req, res) => {
 exports.getAllCardDetails = async (req, res) => {
   try {
     // Retrieve all CardDetails entries
-    const cardDetails = await CardDetails.find();
+    const cardDetails = await CardDetails.findAll();
     res.status(200).json(cardDetails);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -43,7 +42,7 @@ exports.getCardDetailById = async (req, res) => {
 
   try {
     // Find the CardDetails entry by ID
-    const cardDetail = await CardDetails.findById(id);
+    const cardDetail = await CardDetails.findByPk(id);
     if (!cardDetail) {
       return res.status(404).json({ message: "Card details not found" });
     }
@@ -61,17 +60,14 @@ exports.updateCardDetail = async (req, res) => {
 
   try {
     // Update the CardDetails entry by ID
-    const updatedCardDetail = await CardDetails.findByIdAndUpdate(
-      id,
-      {
+    const updatedCardDetail = await CardDetails.findByPk(id);
+    if (updatedCardDetail) await updatedCardDetail.update({
         card_number,
         card_holder_name,
         expiry_date,
         cvv,
         billing_address,
-      },
-      { new: true },
-    );
+      });
 
     if (!updatedCardDetail) {
       return res.status(404).json({ message: "Card details not found" });
@@ -91,7 +87,8 @@ exports.deleteCardDetail = async (req, res) => {
 
   try {
     // Delete the CardDetails entry by ID
-    const deletedCardDetail = await CardDetails.findByIdAndDelete(id);
+    const deletedCardDetail = await CardDetails.findByPk(id);
+    if (deletedCardDetail) await deletedCardDetail.destroy();
     if (!deletedCardDetail) {
       return res.status(404).json({ message: "Card details not found" });
     }

@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+const sequelize = require("../config/database");
 const bcrypt = require("bcryptjs");
 const WithdrawalPayment = require("../models/WithdrawalPayment");
 const Transaction = require("../models/Transaction");
@@ -46,8 +46,7 @@ exports.initiateWithdrawal = async ({
   userAgent,
   flowType = "withdrawal",
 }) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     if (!amount || Number(amount) <= 0) {
@@ -64,7 +63,7 @@ exports.initiateWithdrawal = async ({
       throw new Error("Selected bank is not available for payouts");
     }
 
-    const wallet = await Wallet.findOne({ userId: user._id }).session(session);
+    const wallet = await Wallet.findOne({ where: { userId: user.id }, transaction: transactionDb });
     if (!wallet) {
       throw new Error("Wallet not found");
     }
@@ -76,9 +75,9 @@ exports.initiateWithdrawal = async ({
     }
 
     if (idempotencyKey) {
-      const existing = await WithdrawalPayment.findOne({ idempotencyKey }).session(session);
+      const existing = await WithdrawalPayment.findOne({ where: { idempotencyKey }, transaction: transactionDb });
       if (existing) {
-        await session.commitTransaction();
+        await transactionDb.commit();
         return { existing, repeated: true };
       }
     }
@@ -93,11 +92,11 @@ exports.initiateWithdrawal = async ({
       throw new Error("Account name mismatch");
     }
 
-    const withdrawalUprn = generateUPRN(user._id, "withdrawal");
+    const withdrawalUprn = generateUPRN(user.id, "withdrawal");
     const transactionRef = `${SQUAD_MERCHANT_ID.trim() || "MERCHANT"}_${Date.now()}`;
 
-    const withdrawalPayment = new WithdrawalPayment({
-      userId: user._id,
+    const withdrawalPayment = await WithdrawalPayment.create({
+      userId: user.id,
       amount,
       currency: "NGN",
       transactionRef,
@@ -114,13 +113,11 @@ exports.initiateWithdrawal = async ({
         flowType,
         bankName: bank?.name || null,
       },
-    });
+    }, { transaction: transactionDb });
 
-    await withdrawalPayment.save({ session });
-
-    const transaction = new Transaction({
-      senderId: user._id,
-      senderWallet: wallet._id,
+    const transaction = await Transaction.create({
+      senderId: user.id,
+      senderWallet: wallet.id,
       total: Number(amount),
       amount: Number(amount),
       currency: "NGN",
@@ -143,10 +140,9 @@ exports.initiateWithdrawal = async ({
       },
     });
 
-    await transaction.save({ session });
 
     wallet.balance -= Number(amount);
-    await wallet.save({ session });
+    await wallet.save({ transaction: transactionDb });
 
     const withdrawalPayload = {
       amount: Number(amount),
@@ -168,9 +164,9 @@ exports.initiateWithdrawal = async ({
     withdrawalPayment.status = payoutStatus === "successful" ? "successful" : "processing";
     transaction.status = payoutStatus === "successful" ? "completed" : "processing";
 
-    await withdrawalPayment.save({ session });
-    await transaction.save({ session });
-    await session.commitTransaction();
+    await withdrawalPayment.save({ transaction: transactionDb });
+    await transaction.save({ transaction: transactionDb });
+    await transactionDb.commit();
 
     return {
       withdrawal: withdrawalPayment,
@@ -179,24 +175,22 @@ exports.initiateWithdrawal = async ({
     };
   } catch (error) {
     try {
-      await session.abortTransaction();
+      await transactionDb.rollback();
     } catch (abortError) {
       console.error("Abort transaction error:", abortError);
     }
     throw error;
-  } finally {
-    session.endSession();
   }
 };
 
 exports.verifyWithdrawalStatus = async (transactionRef) => {
-  const withdrawalPayment = await WithdrawalPayment.findOne({ transactionRef });
+  const withdrawalPayment = await WithdrawalPayment.findOne({ where: { transactionRef } });
   if (!withdrawalPayment) {
     throw new Error("Withdrawal not found");
   }
 
   if (["successful", "failed", "reversed"].includes(withdrawalPayment.status)) {
-    const transaction = await Transaction.findOne({ "metadata.transactionRef": transactionRef });
+    const transaction = await Transaction.findOne({ where: sequelize.where(sequelize.json("metadata.transactionRef"), transactionRef) });
     return { withdrawalPayment, transaction };
   }
 
@@ -204,37 +198,34 @@ exports.verifyWithdrawalStatus = async (transactionRef) => {
   const squadStatus = statusResponse?.data?.status || "processing";
   const normalized = normalizeStatus(squadStatus);
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
     withdrawalPayment.gatewayResponse = statusResponse;
     withdrawalPayment.status = normalized;
-    await withdrawalPayment.save({ session });
+    await withdrawalPayment.save({ transaction: transactionDb });
 
-    const transaction = await Transaction.findOne({ "metadata.transactionRef": transactionRef }).session(session);
+    const transaction = await Transaction.findOne({ where: sequelize.where(sequelize.json("metadata.transactionRef"), transactionRef), transaction: transactionDb });
     if (transaction) {
       transaction.status = normalized === "successful" ? "completed" : normalized;
-      await transaction.save({ session });
+      await transaction.save({ transaction: transactionDb });
 
       if (["failed", "reversed"].includes(normalized) && !withdrawalPayment.refunded) {
-        const wallet = await Wallet.findById(transaction.senderWallet).session(session);
+        const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
           wallet.balance += transaction.amount;
-          await wallet.save({ session });
+          await wallet.save({ transaction: transactionDb });
           withdrawalPayment.refunded = true;
-          await withdrawalPayment.save({ session });
+          await withdrawalPayment.save({ transaction: transactionDb });
         }
       }
     }
 
-    await session.commitTransaction();
+    await transactionDb.commit();
     return { withdrawalPayment, transaction };
   } catch (error) {
-    await session.abortTransaction();
+    await transactionDb.rollback();
     throw error;
-  } finally {
-    session.endSession();
   }
 };
 
@@ -250,46 +241,43 @@ exports.processWithdrawalWebhook = async (event) => {
 
   const status = normalizeStatus(event.data?.status);
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const transactionDb = await sequelize.transaction();
 
   try {
-    const withdrawalPayment = await WithdrawalPayment.findOne({ transactionRef }).session(session);
+    const withdrawalPayment = await WithdrawalPayment.findOne({ where: { transactionRef }, transaction: transactionDb });
     if (!withdrawalPayment) {
       throw new Error("Withdrawal not found");
     }
     if (["successful", "failed", "reversed"].includes(withdrawalPayment.status)) {
-      await session.commitTransaction();
+      await transactionDb.commit();
       return { withdrawalPayment, alreadyProcessed: true };
     }
 
     withdrawalPayment.status = status;
     withdrawalPayment.gatewayResponse = event.data;
     withdrawalPayment.gatewayResponseCode = event.data?.response_code || "";
-    await withdrawalPayment.save({ session });
+    await withdrawalPayment.save({ transaction: transactionDb });
 
-    const transaction = await Transaction.findOne({ "metadata.transactionRef": transactionRef }).session(session);
+    const transaction = await Transaction.findOne({ where: sequelize.where(sequelize.json("metadata.transactionRef"), transactionRef), transaction: transactionDb });
     if (transaction) {
       transaction.status = status === "successful" ? "completed" : status;
-      await transaction.save({ session });
+      await transaction.save({ transaction: transactionDb });
 
       if (["failed", "reversed"].includes(status) && !withdrawalPayment.refunded) {
-        const wallet = await Wallet.findById(transaction.senderWallet).session(session);
+        const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
           wallet.balance += transaction.amount;
-          await wallet.save({ session });
+          await wallet.save({ transaction: transactionDb });
           withdrawalPayment.refunded = true;
-          await withdrawalPayment.save({ session });
+          await withdrawalPayment.save({ transaction: transactionDb });
         }
       }
     }
 
-    await session.commitTransaction();
+    await transactionDb.commit();
     return { withdrawalPayment, transaction };
   } catch (error) {
-    await session.abortTransaction();
+    await transactionDb.rollback();
     throw error;
-  } finally {
-    session.endSession();
   }
 };

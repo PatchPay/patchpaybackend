@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const mongoose = require('mongoose');
 
 /**
  * Generate a Unique Payment Reference Number (UPRN)
@@ -209,12 +208,12 @@ exports.validateNameMatch = (registeredName, bankName) => {
  * Find a transaction by UPRN
  * 
  * @param {string} uprn - The UPRN to search for
- * @param {mongoose.Model} TransactionModel - The Transaction model to query
+ * @param {import('sequelize').ModelStatic} TransactionModel - The transaction model to query
  * @returns {Promise<Object>} - The found transaction or null
  */
 exports.findTransactionByUPRN = async (uprn, TransactionModel) => {
   try {
-    return await TransactionModel.findOne({ reference: uprn });
+    return await TransactionModel.findOne({ where: { reference: uprn } });
   } catch (error) {
     console.error('Error finding transaction by UPRN:', error);
     return null;
@@ -226,13 +225,13 @@ exports.findTransactionByUPRN = async (uprn, TransactionModel) => {
  * This tracks payments using Squad API for instant verification
  * 
  * @param {Object} paymentData - Payment information
- * @param {mongoose.Model} VerificationModel - The verification model to use
+ * @param {import('sequelize').ModelStatic} VerificationModel - The verification model to use
  * @returns {Promise<Object>} - The created verification record
  */
 exports.createVerificationRecord = async (paymentData, VerificationModel) => {
   try {
     // Create verification record
-    const verification = new VerificationModel({
+    const verification = await VerificationModel.create({
       userId: paymentData.userId,
       paymentMethod: paymentData.paymentMethod || 'squad_api',
       amount: paymentData.amount,
@@ -249,7 +248,6 @@ exports.createVerificationRecord = async (paymentData, VerificationModel) => {
       metadata: paymentData.metadata || {}
     });
     
-    await verification.save();
     return verification;
   } catch (error) {
     console.error('Error creating verification record:', error);

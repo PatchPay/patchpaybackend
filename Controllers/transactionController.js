@@ -1,56 +1,75 @@
 const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
-const mongoose = require("mongoose");
+const sequelize = require("../config/database");
 const { generateUPRN } = require("../utils/paymentUtils");
 
 // Get all transactions
 const getAllTransactions = async (req, res) => {
   try {
-    const transactions = await Transaction.find()
-      .populate("senderWallet")
-      .populate("recipientWallet");
-    res.status(200).json({
+    const transactions = await Transaction.findAll({
+      include: [
+        { model: Wallet, as: "senderWallet" },
+        { model: Wallet, as: "recipientWallet" },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    return res.status(200).json({
       success: true,
       data: transactions,
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("Error fetching transactions:", error);
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+// Get user transactions
 const getUserTransactions = async (req, res) => {
   try {
-    const userId = req.params.userId;
+    const { userId } = req.params;
 
-    const transactions = await Transaction.find({
-      $or: [{ senderId: userId }, { recipientId: userId }],
-    })
-      .populate("senderWallet")
-      .populate("recipientWallet")
-      .sort({ createdAt: -1 });
+    const transactions = await Transaction.findAll({
+      where: {
+        [sequelize.Sequelize.Op.or]: [
+          { senderId: userId },
+          { recipientId: userId },
+        ],
+      },
+      include: [
+        { model: Wallet, as: "senderWallet" },
+        { model: Wallet, as: "recipientWallet" },
+      ],
+      order: [["created_at", "DESC"]],
+    });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: transactions,
     });
   } catch (error) {
     console.error("Error fetching user transactions:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch user transactions",
     });
   }
 };
 
-// Get a single transaction by ID
+// Get transaction by ID
 const getTransactionById = async (req, res) => {
   try {
-    const transaction = await Transaction.findById(req.params.id)
-      .populate("senderWallet")
-      .populate("recipientWallet");
+    const transaction = await Transaction.findByPk(req.params.id, {
+      include: [
+        { model: Wallet, as: "senderWallet" },
+        { model: Wallet, as: "recipientWallet" },
+      ],
+    });
 
     if (!transaction) {
       return res.status(404).json({
@@ -59,35 +78,45 @@ const getTransactionById = async (req, res) => {
       });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       data: transaction,
     });
   } catch (error) {
     console.error("Error fetching transaction:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch transaction",
     });
   }
 };
 
-// Create a new transaction
+// Create transaction
 const createTransaction = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const dbTransaction = await sequelize.transaction();
 
   try {
-    const { amount, senderWalletId, recipientWalletId, description } = req.body;
+    const {
+      amount,
+      senderWalletId,
+      recipientWalletId,
+      description,
+    } = req.body;
 
-    // Get the wallets
-    const senderWallet = await Wallet.findById(senderWalletId).session(session);
-    const recipientWallet =
-      await Wallet.findById(recipientWalletId).session(session);
+    const senderWallet = await Wallet.findByPk(senderWalletId, {
+      transaction: dbTransaction,
+      lock: true,
+    });
+
+    const recipientWallet = await Wallet.findByPk(recipientWalletId, {
+      transaction: dbTransaction,
+      lock: true,
+    });
 
     if (!senderWallet || !recipientWallet) {
-      await session.abortTransaction();
-      session.endSession();
+      await dbTransaction.rollback();
+
       return res.status(404).json({
         success: false,
         message: !senderWallet
@@ -96,60 +125,68 @@ const createTransaction = async (req, res) => {
       });
     }
 
-    // Check if sender has sufficient balance
-    if (senderWallet.balance < amount) {
-      await session.abortTransaction();
-      session.endSession();
+    if (Number(senderWallet.balance) < Number(amount)) {
+      await dbTransaction.rollback();
+
       return res.status(400).json({
         success: false,
         message: "Insufficient balance",
       });
     }
 
-    // Generate UPRN
     const reference = await generateUPRN(senderWallet.userId, "transfer");
 
-    // Create the transaction
-    const transaction = new Transaction({
-      type: "transfer",
-      amount,
-      currency: senderWallet.currency,
-      senderWallet: senderWalletId,
-      senderId: senderWallet.userId,
-      recipientWallet: recipientWalletId,
-      recipientId: recipientWallet.userId,
-      reference,
-      description,
-      status: "completed",
+    const transaction = await Transaction.create(
+      {
+        type: "transfer",
+        amount,
+        currency: senderWallet.currency,
+        senderWalletId: senderWallet.id,
+        senderId: senderWallet.userId,
+        recipientWalletId: recipientWallet.id,
+        recipientId: recipientWallet.userId,
+        reference,
+        description,
+        status: "completed",
+      },
+      {
+        transaction: dbTransaction,
+      }
+    );
+
+    senderWallet.balance =
+      Number(senderWallet.balance) - Number(amount);
+
+    recipientWallet.balance =
+      Number(recipientWallet.balance) + Number(amount);
+
+    await senderWallet.save({
+      transaction: dbTransaction,
     });
 
-    await transaction.save({ session });
+    await recipientWallet.save({
+      transaction: dbTransaction,
+    });
 
-    // Update wallet balances
-    senderWallet.balance -= amount;
-    recipientWallet.balance += amount;
+    await dbTransaction.commit();
 
-    await senderWallet.save({ session });
-    await recipientWallet.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: transaction,
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    await dbTransaction.rollback();
 
     console.error("Error creating transaction:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Failed to create transaction",
+      error: error.message,
     });
   }
 };
+
 module.exports = {
   getAllTransactions,
   getTransactionById,

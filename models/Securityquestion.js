@@ -1,27 +1,2 @@
-const mongoose = require('mongoose');
-const Schema = mongoose.Schema;
-
-const securityQuestionSetSchema = new Schema({
-  questions: [{
-    type: String,  // Each question is a string
-    required: true
-  }],
-  user: {
-    type: Schema.Types.ObjectId,
-    ref: 'User',  // References the User model
-    required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-// Create the model
-const SecurityQuestionSet = mongoose.model('SecurityQuestionSet', securityQuestionSetSchema);
-
-module.exports = SecurityQuestionSet;
+const { DataTypes } = require("sequelize"); const sequelize = require("../config/database");
+const SecurityQuestionSet = sequelize.define("SecurityQuestionSet", { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, questions: { type: DataTypes.JSONB, allowNull: false }, user: { type: DataTypes.INTEGER, allowNull: false, references: { model: "users", key: "id" } } }, { tableName: "security_question_sets", underscored: true, timestamps: true }); SecurityQuestionSet.associate = (models) => { SecurityQuestionSet.belongsTo(models.User, { foreignKey: "user" }); }; module.exports = SecurityQuestionSet;

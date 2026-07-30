@@ -1,203 +1,212 @@
-const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const deliveryAddressSchema = new Schema({
-  street: {
-    type: String,
-    required: true,
-  },
-  city: {
-    type: String,
-    required: true,
-  },
-  state: {
-    type: String,
-    required: true,
-  },
-  country: {
-    type: String,
-    required: true,
-  },
-  postal_code: {
-    type: String,
-    required: true,
-  },
-  phoneNumber: {
-    type: String,
-    required: true,
-  },
-});
-
-const quoteSchema = new Schema(
+const Quote = sequelize.define(
+  "Quote",
   {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+
     quote_number: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
       unique: true,
     },
+
     type: {
-      type: String,
-      enum: ["RFQ", "Order"],
-      required: true,
+      type: DataTypes.ENUM("RFQ", "Order"),
+      allowNull: false,
     },
+
     product_description: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
     },
+
     product_quantity: {
-      type: Number,
-      required: true,
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
+
     amount: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     currency: {
-      type: String,
-      enum: ["NGN", "USD", "GBP"],
-      required: true,
+      type: DataTypes.ENUM("NGN", "USD", "GBP"),
+      allowNull: false,
     },
+
     total: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     uprn: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
     },
+
     status: {
-      type: String,
-      enum: ["Pending", "Accepted", "Rejected", "Cancelled"],
-      default: "Pending",
+      type: DataTypes.ENUM(
+        "Pending",
+        "Accepted",
+        "Rejected",
+        "Cancelled"
+      ),
+      defaultValue: "Pending",
     },
-    user: {
-      _id: {
-        type: Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-      },
-      firstName: {
-        type: String,
-        required: true,
-      },
-      surname: {
-        type: String,
-        required: true,
-      },
-      phoneNumber: {
-        type: String,
-        required: true,
-      },
+
+    user_data: {
+      type: DataTypes.JSONB,
+      allowNull: false,
     },
 
     destinatary_user: {
-      _id: {
-        type: Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-      },
-      firstName: {
-        type: String,
-        required: true,
-      },
-      surname: {
-        type: String,
-        required: true,
-      },
-      phoneNumber: {
-        type: String,
-        required: true,
-      },
+      type: DataTypes.JSONB,
+      allowNull: false,
     },
+
     delivery_code: {
-      type: Number,
-      required: true,
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
+
     delivery_type: {
-      type: String,
-      enum: ["Standard", "Secure"],
-      required: true,
+      type: DataTypes.ENUM("Standard", "Secure"),
+      allowNull: false,
     },
+
     trade_type: {
-      type: String,
-      enum: ["Domestic", "International"],
-      required: true,
+      type: DataTypes.ENUM("Domestic", "International"),
+      allowNull: false,
     },
 
     delivery_address: {
-      type: deliveryAddressSchema,
-      required: true,
+      type: DataTypes.JSONB,
+      allowNull: false,
     },
+
     arrival_date: {
-      type: Date,
-      required: true,
+      type: DataTypes.DATE,
+      allowNull: false,
     },
 
     arrival_time: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
     },
+
     line_total: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     delivery_charge: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     transaction_charges: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     subtotal: {
-      type: Number,
-      required: true,
+      type: DataTypes.FLOAT,
+      allowNull: false,
     },
+
     proof_delivery: {
-      type: Schema.Types.ObjectId,
-      ref: "ProofDelivery", // Assuming a reference to a ProofDelivery model
-      required: true,
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
-    coupon: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: "Coupon", // Assuming a reference to a Coupon model
-      },
-    ],
+
+    coupon: {
+      type: DataTypes.JSONB,
+      defaultValue: [],
+    },
+
     exchange_rate: {
-      type: Number,
-      default: 1,
+      type: DataTypes.FLOAT,
+      defaultValue: 1,
     },
+
     responseNotificationDue: {
-      type: Date,
+      field: "response_notification_due",
+      type: DataTypes.DATE,
     },
+
     notificationSent: {
-      type: Boolean,
-      default: false,
+      field: "notification_sent",
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
+
     deletionNotificationSent: {
-      type: Boolean,
-      default: false,
+      field: "deletion_notification_sent",
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
+
     invoice: {
-      type: Schema.Types.ObjectId,
-      ref: "Invoice",
+      type: DataTypes.INTEGER,
+      references: {
+        model: "invoices",
+        key: "id",
+      },
     },
   },
   {
+    tableName: "quotes",
+    underscored: true,
     timestamps: true,
-  },
+
+    indexes: [
+      {
+        fields: [
+          "status",
+          "response_notification_due",
+          "notification_sent",
+        ],
+      },
+      {
+        fields: [
+          "status",
+          "updated_at",
+          "deletion_notification_sent",
+        ],
+      },
+    ],
+  }
 );
 
-// Create indexes for notification queries
-quoteSchema.index({
-  status: 1,
-  responseNotificationDue: 1,
-  notificationSent: 1,
-});
-quoteSchema.index({ status: 1, updatedAt: 1, deletionNotificationSent: 1 });
+Quote.associate = (models) => {
+  Quote.belongsTo(models.Invoice, {
+    foreignKey: "invoice",
+  });
 
-// Create the model
-const Quote = mongoose.models.Quote || mongoose.model("Quote", quoteSchema);
+  Quote.hasMany(models.QuoteStatus, {
+    foreignKey: "quote",
+  });
+
+  Quote.hasMany(models.QuoteHistory, {
+    foreignKey: "quote",
+  });
+
+  Quote.hasMany(models.Request, {
+    foreignKey: "quote_number",
+  });
+
+  Quote.belongsToMany(models.Coupon, {
+    through: "quote_coupons",
+    foreignKey: "quote_id",
+    otherKey: "coupon_id",
+  });
+};
 
 module.exports = Quote;

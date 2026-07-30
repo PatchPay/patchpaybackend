@@ -6,14 +6,13 @@ exports.createMinAmount = async (req, res) => {
 
   try {
     // Create a new MinAmount entry
-    const newMinAmount = new MinAmount({
+    const newMinAmount = await MinAmount.create({
       squad,
       stripe,
       currency
     });
 
     // Save the new MinAmount entry to the database
-    await newMinAmount.save();
     res.status(201).json({
       message: 'MinAmount created successfully',
       newMinAmount
@@ -27,7 +26,7 @@ exports.createMinAmount = async (req, res) => {
 exports.getAllMinAmounts = async (req, res) => {
   try {
     // Retrieve all MinAmount entries
-    const minAmounts = await MinAmount.find();
+    const minAmounts = await MinAmount.findAll();
     res.status(200).json(minAmounts);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -40,7 +39,7 @@ exports.getMinAmountById = async (req, res) => {
 
   try {
     // Find the MinAmount entry by ID
-    const minAmount = await MinAmount.findById(id);
+    const minAmount = await MinAmount.findByPk(id);
     if (!minAmount) {
       return res.status(404).json({ message: 'MinAmount not found' });
     }
@@ -57,11 +56,12 @@ exports.updateMinAmount = async (req, res) => {
 
   try {
     // Update the MinAmount entry by ID
-    const updatedMinAmount = await MinAmount.findByIdAndUpdate(id, {
+    const updatedMinAmount = await MinAmount.findByPk(id);
+    if (updatedMinAmount) await updatedMinAmount.update({
       squad,
       stripe,
       currency
-    }, { new: true });
+    });
 
     if (!updatedMinAmount) {
       return res.status(404).json({ message: 'MinAmount not found' });
@@ -81,7 +81,8 @@ exports.deleteMinAmount = async (req, res) => {
 
   try {
     // Delete the MinAmount entry by ID
-    const deletedMinAmount = await MinAmount.findByIdAndDelete(id);
+    const deletedMinAmount = await MinAmount.findByPk(id);
+    if (deletedMinAmount) await deletedMinAmount.destroy();
     if (!deletedMinAmount) {
       return res.status(404).json({ message: 'MinAmount not found' });
     }

@@ -1,6 +1,7 @@
 const crypto = require("crypto");
-const mongoose = require("mongoose");
+const sequelize = require("../config/database");
 const bcrypt = require("bcryptjs");
+const { Op } = require("sequelize");
 
 const Transaction = require("../models/Transaction");
 const WithdrawalPayment = require("../models/WithdrawalPayment");
@@ -72,14 +73,22 @@ const createPayoutReference = () => {
   return `${merchant}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 };
 
+// Sequelize JSON/JSONB fields don't auto-detect in-place array mutation
+// (e.g. `.push(...)`), so audit/provider-response entries are appended by
+// reassigning the array rather than mutating it, which keeps `.save()`
+// picking up the change.
 const addAudit = (doc, status, message, metadata = {}) => {
-  doc.auditTrail = doc.auditTrail || [];
-  doc.auditTrail.push({
+  const entry = {
     status,
     message,
     metadata,
     createdAt: new Date(),
-  });
+  };
+  doc.auditTrail = [...(doc.auditTrail || []), entry];
+};
+
+const appendProviderResponse = (doc, response) => {
+  doc.providerResponses = [...(doc.providerResponses || []), response];
 };
 
 const mapTransactionStatus = (status) => {
@@ -95,6 +104,10 @@ const mapWithdrawalStatus = (status) => {
   return status;
 };
 
+// Sequelize's unique-constraint violation, in place of Mongo's `error.code === 11000`
+const isUniqueConstraintError = (error) =>
+  error?.name === "SequelizeUniqueConstraintError";
+
 const accountLookup = async ({ bankCode, accountNumber }) => {
   if (!bankCode) {
     const wallet =
@@ -105,7 +118,7 @@ const accountLookup = async ({ bankCode, accountNumber }) => {
       throw error;
     }
 
-    const user = await User.findById(wallet.userId);
+    const user = await User.findByPk(wallet.userId);
     if (!user) {
       const error = new Error("Recipient user not found");
       error.statusCode = 404;
@@ -148,11 +161,13 @@ const internalTransfer = async ({
   await verifyTransactionPin(user, transactionPin);
 
   const existing = await Transaction.findOne({
-    senderId: user._id,
-    idempotencyKey: stableKey,
+    where: {
+      senderId: user.id,
+      idempotencyKey: stableKey,
+    },
   });
   if (existing) {
-    const senderWallet = await walletService.getActiveWalletForUser(user._id);
+    const senderWallet = await walletService.getActiveWalletForUser(user.id);
     return {
       transaction: existing,
       senderBalance: senderWallet?.balance,
@@ -160,13 +175,12 @@ const internalTransfer = async ({
     };
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const t = await sequelize.transaction();
 
   try {
     const senderWallet = await walletService.getActiveWalletForUser(
-      user._id,
-      session,
+      user.id,
+      t,
     );
     if (!senderWallet) {
       const error = new Error("Sender wallet not found");
@@ -176,7 +190,7 @@ const internalTransfer = async ({
 
     const recipientWallet = await walletService.getActiveWalletByAccountNumber(
       recipientAccount,
-      session,
+      t,
     );
     if (!recipientWallet) {
       const error = new Error("Recipient account not found");
@@ -184,7 +198,7 @@ const internalTransfer = async ({
       throw error;
     }
 
-    if (senderWallet._id.toString() === recipientWallet._id.toString()) {
+    if (senderWallet.id === recipientWallet.id) {
       const error = new Error("Cannot transfer to yourself");
       error.statusCode = 400;
       throw error;
@@ -196,9 +210,9 @@ const internalTransfer = async ({
       throw error;
     }
 
-    const recipientUser = await User.findById(recipientWallet.userId).session(
-      session,
-    );
+    const recipientUser = await User.findByPk(recipientWallet.userId, {
+      transaction: t,
+    });
     if (!recipientUser) {
       const error = new Error("Recipient user not found");
       error.statusCode = 404;
@@ -210,120 +224,130 @@ const internalTransfer = async ({
     const total = amount + fee;
 
     const debitedWallet = await walletService.debitWallet({
-      walletId: senderWallet._id,
+      walletId: senderWallet.id,
       amount: total,
-      session,
+      transaction: t,
     });
 
     await walletService.creditWallet({
-      walletId: recipientWallet._id,
+      walletId: recipientWallet.id,
       amount,
-      session,
+      transaction: t,
     });
 
-    const sharedReference = generateUPRN(user._id, "transfer");
+    const sharedReference = generateUPRN(user.id, "transfer");
     const senderName = getUserDisplayName(user);
     const recipientName = getUserDisplayName(recipientUser);
 
-    const transaction = new Transaction({
-      type: "transfer",
-      amount,
-      fee,
-      total,
-      currency: senderWallet.currency,
-      status: "completed",
-      senderWallet: senderWallet._id,
-      senderId: user._id,
-      reference: `${sharedReference}-DR`,
-      idempotencyKey: stableKey,
-      isUserAccountTransfer: true,
-      description: description || "Wallet transfer",
-      paymentMethod: "wallet",
-      paymentGateway: feeDetails.paymentGateway || "Internal",
-      metadata: {
-        sharedReference,
-        transferRole: "debit",
-        recipientAccount,
-        recipientId: recipientWallet.userId,
-        recipientWallet: recipientWallet._id,
-        recipientName,
-        senderName,
-        feeDetails,
+    const senderTransaction = await Transaction.create(
+      {
+        type: "transfer",
+        amount,
+        fee,
+        total,
+        currency: senderWallet.currency,
+        status: "completed",
+        senderWallet: senderWallet.id,
+        senderId: user.id,
+        reference: `${sharedReference}-DR`,
+        idempotencyKey: stableKey,
+        isUserAccountTransfer: true,
+        description: description || "Wallet transfer",
+        paymentMethod: "wallet",
+        paymentGateway: feeDetails.paymentGateway || "Internal",
+        metadata: {
+          sharedReference,
+          transferRole: "debit",
+          recipientAccount,
+          recipientId: recipientWallet.userId,
+          recipientWallet: recipientWallet.id,
+          recipientName,
+          senderName,
+          feeDetails,
+        },
       },
-    });
-    addAudit(transaction, "success", "Internal transfer completed");
+      { transaction: t },
+    );
+    addAudit(senderTransaction, "success", "Internal transfer completed");
 
-    const receiverTransaction = new Transaction({
-      type: "transfer",
-      amount,
-      fee: 0,
-      total: amount,
-      currency: recipientWallet.currency,
-      status: "completed",
-      recipientWallet: recipientWallet._id,
-      recipientId: recipientWallet.userId,
-      reference: `${sharedReference}-CR`,
-      idempotencyKey: `${stableKey}:credit`,
-      isUserAccountTransfer: true,
-      description: description || "Wallet transfer received",
-      paymentMethod: "wallet",
-      paymentGateway: feeDetails.paymentGateway || "Internal",
-      metadata: {
-        sharedReference,
-        transferRole: "credit",
-        senderId: user._id,
-        senderWallet: senderWallet._id,
-        senderAccount: senderWallet.accountNumber,
-        senderName,
-        recipientName,
+    const receiverTransaction = await Transaction.create(
+      {
+        type: "transfer",
+        amount,
+        fee: 0,
+        total: amount,
+        currency: recipientWallet.currency,
+        status: "completed",
+        recipientWallet: recipientWallet.id,
+        recipientId: recipientWallet.userId,
+        reference: `${sharedReference}-CR`,
+        idempotencyKey: `${stableKey}:credit`,
+        isUserAccountTransfer: true,
+        description: description || "Wallet transfer received",
+        paymentMethod: "wallet",
+        paymentGateway: feeDetails.paymentGateway || "Internal",
+        metadata: {
+          sharedReference,
+          transferRole: "credit",
+          senderId: user.id,
+          senderWallet: senderWallet.id,
+          senderAccount: senderWallet.accountNumber,
+          senderName,
+          recipientName,
+        },
       },
-    });
+      { transaction: t },
+    );
     addAudit(
       receiverTransaction,
       "success",
       "Internal transfer credit completed",
     );
 
-    await transaction.save({ session });
-    await receiverTransaction.save({ session });
-    await session.commitTransaction();
+    // addAudit mutated auditTrail after create(), so persist that change
+    await senderTransaction.save({ transaction: t });
+    await receiverTransaction.save({ transaction: t });
+
+    await t.commit();
 
     return {
-      transaction,
+      transaction: senderTransaction,
       receiverTransaction,
       senderBalance: debitedWallet.balance,
       repeated: false,
     };
   } catch (error) {
-    await session.abortTransaction();
-    if (error.code === 11000) {
+    await t.rollback();
+    if (isUniqueConstraintError(error)) {
       const duplicate = await Transaction.findOne({
-        idempotencyKey: stableKey,
+        where: {
+          idempotencyKey: stableKey,
+        },
       });
       if (duplicate) return { transaction: duplicate, repeated: true };
     }
     throw error;
-  } finally {
-    session.endSession();
   }
 };
 
-const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+const finalizePayout = async ({ withdrawal, transaction: transactionRecord, payoutResult }) => {
+  const t = await sequelize.transaction();
 
   try {
-    // 🔥 Reload fresh copies from MongoDB
-    withdrawal = await WithdrawalPayment.findById(withdrawal._id).session(session);
+    withdrawal = await WithdrawalPayment.findByPk(withdrawal.id, {
+      transaction: t,
+    });
 
     if (!withdrawal) {
       throw new Error("Withdrawal record not found");
     }
 
-    if (transaction) {
-      transaction = await Transaction.findById(transaction._id).session(session);
+    if (transactionRecord) {
+      transactionRecord = await Transaction.findByPk(transactionRecord.id, {
+        transaction: t,
+      });
 
-      if (!transaction) {
+      if (!transactionRecord) {
         throw new Error("Transaction record not found");
       }
     }
@@ -332,9 +356,9 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
     withdrawal.providerResponses ??= [];
     withdrawal.auditTrail ??= [];
 
-    if (transaction) {
-      transaction.providerResponses ??= [];
-      transaction.auditTrail ??= [];
+    if (transactionRecord) {
+      transactionRecord.providerResponses ??= [];
+      transactionRecord.auditTrail ??= [];
     }
 
     const status = mapWithdrawalStatus(payoutResult.status);
@@ -343,74 +367,66 @@ const finalizePayout = async ({ withdrawal, transaction, payoutResult }) => {
     withdrawal.squadRef =
       payoutResult.providerReference || withdrawal.squadRef;
     withdrawal.gatewayResponse = payoutResult.raw;
-    withdrawal.providerResponses.push(payoutResult.raw);
+    appendProviderResponse(withdrawal, payoutResult.raw);
 
-    addAudit(
-      withdrawal,
-      status,
-      "SquadCo payout response received"
-    );
+    addAudit(withdrawal, status, "SquadCo payout response received");
 
-    if (transaction) {
-      transaction.status = mapTransactionStatus(payoutResult.status);
-      transaction.externalReference =
-        payoutResult.providerReference;
-      transaction.providerReference =
-        payoutResult.providerReference;
+    if (transactionRecord) {
+      transactionRecord.status = mapTransactionStatus(payoutResult.status);
+      transactionRecord.externalReference = payoutResult.providerReference;
+      transactionRecord.providerReference = payoutResult.providerReference;
 
-      transaction.providerResponses.push(payoutResult.raw);
+      appendProviderResponse(transactionRecord, payoutResult.raw);
 
       addAudit(
-        transaction,
-        transaction.status,
-        "Transfer status updated from SquadCo"
+        transactionRecord,
+        transactionRecord.status,
+        "Transfer status updated from SquadCo",
       );
     }
 
     if (
-      transaction &&
+      transactionRecord &&
       ["failed", "reversed"].includes(status) &&
       !withdrawal.refunded
     ) {
       await walletService.creditWallet({
-        walletId: transaction.senderWallet,
-        amount: transaction.total,
-        session,
+        walletId: transactionRecord.senderWallet,
+        amount: transactionRecord.total,
+        transaction: t,
       });
 
       withdrawal.refunded = true;
-      transaction.status = "reversed";
+      transactionRecord.status = "reversed";
 
       addAudit(
-        transaction,
+        transactionRecord,
         "reversed",
-        "Wallet debit reversed after failed payout"
+        "Wallet debit reversed after failed payout",
       );
 
       addAudit(
         withdrawal,
         "reversed",
-        "Wallet debit reversed after failed payout"
+        "Wallet debit reversed after failed payout",
       );
     }
 
-    await withdrawal.save({ session });
+    await withdrawal.save({ transaction: t });
 
-    if (transaction) {
-      await transaction.save({ session });
+    if (transactionRecord) {
+      await transactionRecord.save({ transaction: t });
     }
 
-    await session.commitTransaction();
+    await t.commit();
 
     return {
       withdrawal,
-      transaction,
+      transaction: transactionRecord,
     };
   } catch (error) {
-    await session.abortTransaction();
+    await t.rollback();
     throw error;
-  } finally {
-    session.endSession();
   }
 };
 
@@ -459,13 +475,17 @@ const externalBankTransfer = async ({
   await verifyTransactionPin(user, transactionPin);
 
   const existing = await WithdrawalPayment.findOne({
-    idempotencyKey: stableKey,
+    where: {
+      idempotencyKey: stableKey,
+    },
   });
   if (existing) {
-    const transaction = await Transaction.findOne({
-      "metadata.transactionRef": existing.transactionRef,
+    const existingTransaction = await Transaction.findOne({
+      where: {
+        "metadata.transactionRef": existing.transactionRef,
+      },
     });
-    return { withdrawal: existing, transaction, repeated: true };
+    return { withdrawal: existing, transaction: existingTransaction, repeated: true };
   }
 
   const lookup = await accountLookup({ bankCode, accountNumber });
@@ -475,17 +495,13 @@ const externalBankTransfer = async ({
     throw error;
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const t = await sequelize.transaction();
 
   let withdrawal;
-  let transaction;
+  let transactionRecord;
 
   try {
-    const wallet = await walletService.getActiveWalletForUser(
-      user._id,
-      session,
-    );
+    const wallet = await walletService.getActiveWalletForUser(user.id, t);
     if (!wallet) {
       const error = new Error("Wallet not found");
       error.statusCode = 404;
@@ -502,8 +518,8 @@ const externalBankTransfer = async ({
 
     const transactionRef = createPayoutReference();
 
-    withdrawal = new WithdrawalPayment({
-      userId: user._id,
+    withdrawal = WithdrawalPayment.build({
+      userId: user.id,
       amount,
       currency: "NGN",
       transactionRef,
@@ -526,53 +542,62 @@ const externalBankTransfer = async ({
       "External transfer created and awaiting provider",
     );
 
-    transaction = new Transaction({
-      senderId: user._id,
-      senderWallet: wallet._id,
-      amount,
-      fee: 0,
-      total: amount,
-      currency: "NGN",
-      type: "withdrawal",
-      status: "pending",
-      reference: generateUPRN(user._id, "withdrawal"),
-      idempotencyKey: stableKey,
-      isUserAccountTransfer: true,
-      description: description || "External bank transfer",
-      paymentMethod: "bank",
-      paymentGateway: "SquadCo",
-      provider: "SquadCo",
-      metadata: {
-        transactionRef,
-        flowType,
-        withdrawalDetails: {
-          accountName: lookup.accountName,
-          accountNumber,
-          bankCode,
-          bankName: lookup.raw?.data?.bank_name || null,
+    transactionRecord = await Transaction.create(
+      {
+        senderId: user.id,
+        senderWallet: wallet.id,
+        amount,
+        fee: 0,
+        total: amount,
+        currency: "NGN",
+        type: "withdrawal",
+        status: "pending",
+        reference: generateUPRN(user.id, "withdrawal"),
+        idempotencyKey: stableKey,
+        isUserAccountTransfer: true,
+        description: description || "External bank transfer",
+        paymentMethod: "bank",
+        paymentGateway: "SquadCo",
+        provider: "SquadCo",
+        metadata: {
+          transactionRef,
+          flowType,
+          withdrawalDetails: {
+            accountName: lookup.accountName,
+            accountNumber,
+            bankCode,
+            bankName: lookup.raw?.data?.bank_name || null,
+          },
         },
       },
-    });
+      { transaction: t },
+    );
     addAudit(
-      transaction,
+      transactionRecord,
       "pending",
       "Wallet debit reserved for external transfer",
     );
 
-    await withdrawal.save({ session });
-    await transaction.save({ session });
-    await walletService.debitWallet({ walletId: wallet._id, amount, session });
+    await withdrawal.save({ transaction: t });
+    await transactionRecord.save({ transaction: t });
+    await walletService.debitWallet({
+      walletId: wallet.id,
+      amount,
+      transaction: t,
+    });
 
-    await session.commitTransaction();
+    await t.commit();
   } catch (error) {
-    await session.abortTransaction();
-    if (error.code === 11000) {
+    await t.rollback();
+    if (isUniqueConstraintError(error)) {
       const duplicate = await WithdrawalPayment.findOne({
-        idempotencyKey: stableKey,
+        where: { idempotencyKey: stableKey },
       });
       if (duplicate) {
         const duplicateTransaction = await Transaction.findOne({
-          "metadata.transactionRef": duplicate.transactionRef,
+          where: {
+            "metadata.transactionRef": duplicate.transactionRef,
+          },
         });
         return {
           withdrawal: duplicate,
@@ -582,8 +607,6 @@ const externalBankTransfer = async ({
       }
     }
     throw error;
-  } finally {
-    session.endSession();
   }
 
   try {
@@ -598,51 +621,53 @@ const externalBankTransfer = async ({
 
     const finalized = await finalizePayout({
       withdrawal,
-      transaction,
+      transaction: transactionRecord,
       payoutResult,
     });
     return { ...finalized, repeated: false };
   } catch (error) {
-  if (error.retryable) {
-    await markPayoutRetryable({
+    if (error.retryable) {
+      await markPayoutRetryable({
+        withdrawal,
+        transaction: transactionRecord,
+        error,
+      });
+
+      const err = new Error(
+        "Transfer is still processing. Please check your transaction history shortly.",
+      );
+      err.statusCode = 202;
+      throw err;
+    }
+
+    await finalizePayout({
       withdrawal,
-      transaction,
-      error,
+      transaction: transactionRecord,
+      payoutResult: {
+        status: "failed",
+        raw: error.providerResponse || { message: error.message },
+        providerReference: null,
+      },
     });
 
+    // Throw a clean error to the frontend
     const err = new Error(
-      "Transfer is still processing. Please check your transaction history shortly."
+      error.response?.data?.message ||
+        error.providerResponse?.message ||
+        error.message ||
+        "External bank transfer failed.",
     );
-    err.statusCode = 202;
+
+    err.statusCode = error.statusCode || 400;
+
     throw err;
   }
-
-  await finalizePayout({
-    withdrawal,
-    transaction,
-    payoutResult: {
-      status: "failed",
-      raw: error.providerResponse || { message: error.message },
-      providerReference: null,
-    },
-  });
-
-  // Throw a clean error to the frontend
-  const err = new Error(
-    error.response?.data?.message ||
-    error.providerResponse?.message ||
-    error.message ||
-    "External bank transfer failed."
-  );
-
-  err.statusCode = error.statusCode || 400;
-
-  throw err;
-}
 };
 
 const verifyExternalTransferStatus = async (transactionRef) => {
-  const withdrawal = await WithdrawalPayment.findOne({ transactionRef });
+  const withdrawal = await WithdrawalPayment.findOne({
+    where: { transactionRef },
+  });
   if (!withdrawal) {
     const error = new Error("Transfer not found");
     error.statusCode = 404;
@@ -650,7 +675,9 @@ const verifyExternalTransferStatus = async (transactionRef) => {
   }
 
   const transaction = await Transaction.findOne({
-    "metadata.transactionRef": transactionRef,
+    where: {
+      "metadata.transactionRef": transactionRef,
+    },
   });
 
   if (
@@ -677,7 +704,9 @@ const processExternalTransferWebhook = async (event) => {
     throw error;
   }
 
-  const withdrawal = await WithdrawalPayment.findOne({ transactionRef });
+  const withdrawal = await WithdrawalPayment.findOne({
+    where: { transactionRef },
+  });
   if (!withdrawal) {
     const error = new Error("Transfer not found");
     error.statusCode = 404;
@@ -685,7 +714,9 @@ const processExternalTransferWebhook = async (event) => {
   }
 
   const transaction = await Transaction.findOne({
-    "metadata.transactionRef": transactionRef,
+    where: {
+      "metadata.transactionRef": transactionRef,
+    },
   });
 
   if (

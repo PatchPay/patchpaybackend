@@ -6,13 +6,12 @@ exports.createTotal = async (req, res) => {
 
   try {
     // Create a new Total entry
-    const newTotal = new Total({
+    const newTotal = await Total.create({
       value,
       currency
     });
 
     // Save the new total entry to the database
-    await newTotal.save();
     res.status(201).json({
       message: 'Total created successfully',
       newTotal
@@ -26,7 +25,7 @@ exports.createTotal = async (req, res) => {
 exports.getAllTotals = async (req, res) => {
   try {
     // Retrieve all total entries
-    const totals = await Total.find();
+    const totals = await Total.findAll();
     res.status(200).json(totals);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -39,7 +38,7 @@ exports.getTotalById = async (req, res) => {
 
   try {
     // Find the Total entry by ID
-    const total = await Total.findById(id);
+    const total = await Total.findByPk(id);
     if (!total) {
       return res.status(404).json({ message: 'Total not found' });
     }
@@ -56,7 +55,8 @@ exports.updateTotal = async (req, res) => {
 
   try {
     // Update the total entry by ID
-    const updatedTotal = await Total.findByIdAndUpdate(id, { value, currency }, { new: true });
+    const updatedTotal = await Total.findByPk(id);
+    if (updatedTotal) await updatedTotal.update({ value, currency });
     if (!updatedTotal) {
       return res.status(404).json({ message: 'Total not found' });
     }
@@ -75,7 +75,8 @@ exports.deleteTotal = async (req, res) => {
 
   try {
     // Delete the total entry by ID
-    const deletedTotal = await Total.findByIdAndDelete(id);
+    const deletedTotal = await Total.findByPk(id);
+    if (deletedTotal) await deletedTotal.destroy();
     if (!deletedTotal) {
       return res.status(404).json({ message: 'Total not found' });
     }

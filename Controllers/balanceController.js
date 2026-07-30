@@ -1,48 +1,6 @@
-import Balance from '../models/balance.js';
-
-// Create a new balance
-exports.createBalance = async (req, res) => {
-  try {
-    const balance = new Balance(req.body);
-    await balance.save();
-    res.status(201).json(balance);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
-
-// Get all balances
-exports.getAllBalances = async (req, res) => {
-  try {
-    const balances = await Balance.find().populate('balance').populate('available_balance').populate('user');
-    res.status(200).json(balances);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get a single balance by ID
-exports.getBalanceById = async (req, res) => {
-  try {
-    const balance = await Balance.findById(req.params.id).populate('balance').populate('available_balance').populate('user');
-    if (!balance) {
-      return res.status(404).json({ message: 'Balance not found' });
-    }
-    res.status(200).json(balance);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Update a balance by ID
-exports.updateBalance = async (req, res) => {
-  try {
-    const balance = await Balance.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!balance) {
-      return res.status(404).json({ message: 'Balance not found' });
-    }
-    res.status(200).json(balance);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
+const Balance = require("../models/Balance"); const Amount = require("../models/Amount"); const User = require("../models/User");
+const include = [{ model: Amount, as: "balanceAmount" }, { model: Amount, as: "availableBalanceAmount" }, { model: User }];
+exports.createBalance = async (req, res) => { try { res.status(201).json(await Balance.create(req.body)); } catch (error) { res.status(400).json({ error: error.message }); } };
+exports.getAllBalances = async (req, res) => { try { res.status(200).json(await Balance.findAll({ include })); } catch (error) { res.status(500).json({ error: error.message }); } };
+exports.getBalanceById = async (req, res) => { try { const balance = await Balance.findByPk(req.params.id, { include }); if (!balance) return res.status(404).json({ message: "Balance not found" }); res.status(200).json(balance); } catch (error) { res.status(500).json({ error: error.message }); } };
+exports.updateBalance = async (req, res) => { try { const balance = await Balance.findByPk(req.params.id); if (!balance) return res.status(404).json({ message: "Balance not found" }); await balance.update(req.body); res.status(200).json(balance); } catch (error) { res.status(400).json({ error: error.message }); } };

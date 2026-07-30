@@ -2,9 +2,13 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { Op } = require("sequelize");
 const emailService = require("../services/emailService");
 const Wallet = require("../models/Wallet");
 const { generateAccountNumber } = require("../utils/accountUtils");
+
+
+
 
 const registerUser = async (req, res) => {
   try {
@@ -30,7 +34,11 @@ const registerUser = async (req, res) => {
     } = req.body;
 
     // Check if email exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({
+       where: {
+        email,
+    },
+    });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered" });
     }
@@ -112,15 +120,14 @@ const registerUser = async (req, res) => {
     });
 
     // Save user
-    const newUser = new User(userData);
-    await newUser.save();
+  const newUser = await User.create(userData);
 
     // 🔥 Send OTP (DO NOT BLOCK USER CREATION)
     sendOTPEmail(email, otp).catch((err) => {
       console.error("❌ OTP email failed:", err.message);
     });
 
-    const userResponse = newUser.toObject();
+  const userResponse = newUser.toJSON();
     delete userResponse.password;
     delete userResponse.otp;
     delete userResponse.otpExpires;
@@ -157,7 +164,12 @@ const loginUser = async (req, res) => {
 
     // Find the user by email - case insensitive search
     const user = await User.findOne({
-      email: { $regex: new RegExp(`^${email}$`, "i") },
+     where: {
+    email: {
+      [Op.iLike]: email,
+    },
+  },
+      
     });
 
     // Debug: Log what we found
@@ -208,10 +220,14 @@ const loginUser = async (req, res) => {
     }
 
     // Check if user has a wallet, create one if not
-    const existingWallet = await Wallet.findOne({ userId: user._id });
+    const existingWallet = await Wallet.findOne({
+        where:{
+        userId:user.id
+    }
+    });
 
     if (!existingWallet) {
-      console.log(`🏦 User ${user._id} doesn't have a wallet, creating one...`);
+      console.log(`🏦 User ${user.id} doesn't have a wallet, creating one...`);
 
       // Generate a unique account number using user's country code
       const accountNumber = generateAccountNumber(user.countryCode);
@@ -237,39 +253,38 @@ const loginUser = async (req, res) => {
       }
 
       // Create a new wallet for the user with proper currency
-      const newWallet = new Wallet({
-        userId: user._id,
+      const newWallet = await Wallet.create({
+        userId: user.id,
         accountNumber,
         balance: 0,
         currency,
         isActive: true,
       });
 
-      await newWallet.save();
       console.log(
-        `💰 Wallet created for user ${user._id} with account number: ${accountNumber} and currency: ${currency}`,
+        `💰 Wallet created for user ${user.id} with account number: ${accountNumber} and currency: ${currency}`,
       );
     } else {
       console.log(
-        `💼 User ${user._id} already has wallet with account: ${existingWallet.accountNumber}`,
+        `💼 User ${user.id} already has wallet with account: ${existingWallet.accountNumber}`,
       );
     }
 
     // Debug: Log full user object (except password)
-    const debugUser = { ...user.toObject() };
+   const debugUser = user.toJSON();
     delete debugUser.password;
     console.log("👤 User details:", JSON.stringify(debugUser, null, 2));
 
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET || "patchpay-secret-key-7d9ac52e";
     const token = jwt.sign(
-      { userId: user._id, email: user.email, accountType: user.accountType },
+      { userId: user.id, email: user.email, accountType: user.accountType },
       jwtSecret,
       { expiresIn: "24h" },
     );
 
     // Return user info without password
-    const userResponse = { ...user.toObject() };
+   const userResponse = user.toJSON();
     delete userResponse.password;
 
     console.log(`✅ Login successful for user: ${email}`);
@@ -300,12 +315,16 @@ const verifyEmail = async (req, res) => {
     }
 
     // Find user by email and token
-    const user = await User.findOne({
-      email,
-      otp: otp,
-      otpExpires: { $gt: Date.now() },
-      emailVerified: false,
-    });
+  const user = await User.findOne({
+  where: {
+    email,
+    otp: String(otp),
+    otpExpires: {
+      [Op.gt]: new Date(),
+    },
+    emailVerified: false,
+  },
+});
 
     if (!user) {
       console.log(`❌ Verification failed: Invalid Otp or email ${email}`);
@@ -321,11 +340,11 @@ const verifyEmail = async (req, res) => {
     await user.save();
 
     // Check if user already has a wallet
-    let userWallet = await Wallet.findOne({ userId: user._id });
+    let userWallet = await Wallet.findOne({ where: { userId: user.id } });
 
     // If no wallet exists, create one with a unique account number
     if (!userWallet) {
-      console.log(`🏦 Creating wallet for newly verified user: ${user._id}`);
+      console.log(`🏦 Creating wallet for newly verified user: ${user.id}`);
 
       // Generate unique account number using user's country code
       const accountNumber = generateAccountNumber(user.countryCode);
@@ -353,15 +372,14 @@ const verifyEmail = async (req, res) => {
       }
 
       // Create new wallet with proper currency
-      userWallet = new Wallet({
-        userId: user._id,
+      userWallet = await Wallet.create({
+        userId: user.id,
         accountNumber,
         balance: 0,
         currency,
         isActive: true,
       });
 
-      await userWallet.save();
       console.log(
         `💰 Wallet created successfully with account number: ${accountNumber} and currency: ${currency}`,
       );
@@ -392,7 +410,11 @@ const resendOtp = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+       where: {
+        email,
+    },
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -462,13 +484,17 @@ const logout = async (req, res) => {
 
 const getUserProfile = async (req, res) => {
   try {
-    console.log("📥 Fetching user profile for ID:", req.user._id);
+    console.log("📥 Fetching user profile for ID:", req.user.id);
 
     // Find user by ID from the authenticated request
-    const user = await User.findById(req.user._id).select("-password");
+const user = await User.findByPk(req.user.id,{
+    attributes:{
+        exclude:["password"]
+    }
+});
 
     if (!user) {
-      console.log("❌ User not found:", req.user._id);
+      console.log("❌ User not found:", req.user.id);
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -482,13 +508,13 @@ const getUserProfile = async (req, res) => {
 
 const updateUserProfile = async (req, res) => {
   try {
-    console.log("📝 Updating user profile for ID:", req.user._id);
+    console.log("📝 Updating user profile for ID:", req.user.id);
     console.log("📦 Update payload:", req.body);
 
     // Find user by ID
-    const user = await User.findById(req.user._id);
+    const user = await User.findByPk(req.user.id);
     if (!user) {
-      console.log("❌ User not found:", req.user._id);
+      console.log("❌ User not found:", req.user.id);
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -525,7 +551,7 @@ const updateUserProfile = async (req, res) => {
     console.log("✅ User profile updated successfully");
 
     // Return updated user without password
-    const updatedUser = user.toObject();
+   const updatedUser = user.toJSON();
     delete updatedUser.password;
 
     res.status(200).json(updatedUser);
@@ -557,7 +583,7 @@ const setTransactionPin = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findByPk(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -575,6 +601,111 @@ const setTransactionPin = async (req, res) => {
   }
 };
 
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    const user = await User.findOne({
+      where: { email },
+    });
+
+    // Don't reveal whether the email exists
+    if (!user) {
+      return res.status(200).json({
+        message:
+          "If an account exists with this email, a reset code has been sent.",
+      });
+    }
+
+    const { generateOTP, sendPasswordResetEmail } = require("../services/emailService");
+
+    const otp = generateOTP();
+
+    user.resetPasswordOtp = otp;
+    user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+    await user.save();
+
+    await emailService.sendPasswordResetOTP(user.email, otp);
+
+    return res.status(200).json({
+      message: "Password reset OTP sent successfully",
+    });
+  } catch (error) {
+    console.error("❌ Forgot Password Error:", error);
+
+    return res.status(500).json({
+      message: "Error sending password reset OTP",
+      error: error.message,
+    });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, password, confirmPassword } = req.body;
+
+    if (!email || !otp || !password || !confirmPassword) {
+      return res.status(400).json({
+        message: "All fields are required",
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        message: "Passwords do not match",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    const user = await User.findOne({
+      where: {
+        email,
+        resetPasswordOtp: String(otp),
+        resetPasswordExpires: {
+          [Op.gt]: new Date(),
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    user.password = hashedPassword;
+    user.resetPasswordOtp = null;
+    user.resetPasswordExpires = null;
+
+    await user.save();
+
+    return res.status(200).json({
+      message: "Password reset successfully",
+    });
+  } catch (error) {
+    console.error("❌ Reset Password Error:", error);
+
+    return res.status(500).json({
+      message: "Error resetting password",
+      error: error.message,
+    });
+  }
+};
+
 // Export all controller functions
 module.exports = {
   registerUser,
@@ -585,4 +716,6 @@ module.exports = {
   getUserProfile,
   updateUserProfile,
   setTransactionPin,
+  forgotPassword,
+  resetPassword
 };

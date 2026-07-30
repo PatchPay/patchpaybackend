@@ -59,7 +59,11 @@ const authenticateToken = async (req, res, next) => {
       }
       
       // Check if user exists
-      const user = await User.findById(userId).select('-password +transactionPinHash');
+const user = await User.findByPk(userId, {
+  attributes: {
+    exclude: ["password"],
+  },
+});
       
       if (!user) {
         console.log('User not found with ID:', userId);
@@ -69,7 +73,7 @@ const authenticateToken = async (req, res, next) => {
         });
       }
 
-      console.log('User found:', user._id.toString());
+      console.log('User found:', user.id);
 
       // Attach user to request object
       req.user = user;
