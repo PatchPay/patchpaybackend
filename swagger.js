@@ -77,7 +77,7 @@ const options = {
     servers: [
         { url: "http://localhost:5000", description: "Development server" },
           {
-    url: "https://patchpaybackend.onrender.com",
+    url: "http://api.191.218.161.153.nip.io/",
     description: "Production Server",
   },
 

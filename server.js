@@ -154,6 +154,10 @@ async function startServer() {
 
     console.log("✅ PostgreSQL Connected");
 
+    await sequelize.sync({ force: true });
+
+console.log("✅ Database synchronized");
+
     await bankService
       .syncBanksFromSquad()
       .then(() => console.log("✅ Squad bank list synced"))
