@@ -1,21 +1,35 @@
 require("dotenv").config();
-const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Gmail transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD, // Gmail App Password
+  },
+});
 
-console.log("✅ Resend initialized", process.env.RESEND_API_KEY);
+// Verify SMTP connection
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ SMTP Connection Error:", error);
+  } else {
+    console.log("✅ Gmail SMTP is ready to send emails");
+  }
+});
 
 // ✅ Reusable sender
 const sendEmail = async ({ to, subject, html }) => {
   try {
-    const response = await resend.emails.send({
-      from: "PatchPay <onboarding@resend.dev>",
+    const response = await transporter.sendMail({
+      from: `"PatchPay" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
     });
 
-    console.log("✅ Email sent:", response);
+    console.log("✅ Email sent:", response.messageId);
     return response;
   } catch (error) {
     console.error("❌ Email error:", error);
@@ -25,7 +39,7 @@ const sendEmail = async ({ to, subject, html }) => {
 
 // 🔢 Generate OTP
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 // ✉️ Send OTP Email
@@ -34,16 +48,22 @@ const sendOTPEmail = async (userEmail, otp) => {
     to: userEmail,
     subject: "Your PatchPay Verification Code",
     html: `
-      <div style="font-family: Arial; max-width: 600px; margin: auto;">
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
         <h2>Verify Your Account</h2>
+
         <p>Your OTP code is:</p>
 
-        <h1 style="letter-spacing: 5px; text-align:center;">
+        <h1 style="text-align:center; letter-spacing:5px;">
           ${otp}
         </h1>
 
-        <p>This code expires in 10 minutes.</p>
-        <p>If you didn’t request this, ignore this email.</p>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+
+        <p>If you didn't request this verification, you can safely ignore this email.</p>
+
+        <hr>
+
+        <small>PatchPay Team</small>
       </div>
     `,
   });
@@ -53,17 +73,24 @@ const sendOTPEmail = async (userEmail, otp) => {
 const sendPasswordResetOTP = async (userEmail, otp) => {
   return sendEmail({
     to: userEmail,
-    subject: "Reset Your Password - OTP",
+    subject: "Reset Your Password",
     html: `
-      <div style="font-family: Arial; max-width: 600px; margin: auto;">
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
         <h2>Password Reset</h2>
-        <p>Your reset code is:</p>
 
-        <h1 style="letter-spacing: 5px; text-align:center;">
+        <p>Your password reset code is:</p>
+
+        <h1 style="text-align:center; letter-spacing:5px;">
           ${otp}
         </h1>
 
-        <p>This code expires in 10 minutes.</p>
+        <p>This code expires in <strong>10 minutes</strong>.</p>
+
+        <p>If you didn't request a password reset, please ignore this email.</p>
+
+        <hr>
+
+        <small>PatchPay Team</small>
       </div>
     `,
   });
