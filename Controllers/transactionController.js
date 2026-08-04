@@ -3,14 +3,12 @@ const Wallet = require("../models/Wallet");
 const sequelize = require("../config/database");
 const { generateUPRN } = require("../utils/paymentUtils");
 
+
+const { Op } = require("sequelize");
 // Get all transactions
 const getAllTransactions = async (req, res) => {
   try {
     const transactions = await Transaction.findAll({
-      include: [
-        { model: Wallet, as: "senderWallet" },
-        { model: Wallet, as: "recipientWallet" },
-      ],
       order: [["created_at", "DESC"]],
     });
 
@@ -29,21 +27,19 @@ const getAllTransactions = async (req, res) => {
 };
 
 // Get user transactions
+
+
 const getUserTransactions = async (req, res) => {
   try {
     const { userId } = req.params;
 
     const transactions = await Transaction.findAll({
       where: {
-        [sequelize.Sequelize.Op.or]: [
+        [Op.or]: [
           { senderId: userId },
           { recipientId: userId },
         ],
       },
-      include: [
-        { model: Wallet, as: "senderWallet" },
-        { model: Wallet, as: "recipientWallet" },
-      ],
       order: [["created_at", "DESC"]],
     });
 
@@ -52,11 +48,11 @@ const getUserTransactions = async (req, res) => {
       data: transactions,
     });
   } catch (error) {
-    console.error("Error fetching user transactions:", error);
+    console.error(error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch user transactions",
+      message: error.message,
     });
   }
 };
@@ -64,12 +60,7 @@ const getUserTransactions = async (req, res) => {
 // Get transaction by ID
 const getTransactionById = async (req, res) => {
   try {
-    const transaction = await Transaction.findByPk(req.params.id, {
-      include: [
-        { model: Wallet, as: "senderWallet" },
-        { model: Wallet, as: "recipientWallet" },
-      ],
-    });
+    const transaction = await Transaction.findByPk(req.params.id);
 
     if (!transaction) {
       return res.status(404).json({
@@ -83,11 +74,11 @@ const getTransactionById = async (req, res) => {
       data: transaction,
     });
   } catch (error) {
-    console.error("Error fetching transaction:", error);
+    console.error(error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch transaction",
+      message: error.message,
     });
   }
 };
@@ -141,9 +132,9 @@ const createTransaction = async (req, res) => {
         type: "transfer",
         amount,
         currency: senderWallet.currency,
-        senderWalletId: senderWallet.id,
+        senderWallet: senderWallet.id,
         senderId: senderWallet.userId,
-        recipientWalletId: recipientWallet.id,
+        recipientWallet: recipientWallet.id,
         recipientId: recipientWallet.userId,
         reference,
         description,
