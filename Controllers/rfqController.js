@@ -27,11 +27,28 @@ const runAfterResponse = (label, task) => {
 
 // Set up nodemailer transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // Use STARTTLS
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
+    pass: process.env.EMAIL_PASSWORD, // Gmail App Password
   },
+  tls: {
+    rejectUnauthorized: false,
+  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
+});
+
+
+transporter.verify((err, success) => {
+  if (err) {
+    console.error("❌ SMTP Verify Error:", err);
+  } else {
+    console.log("✅ SMTP Server Ready");
+  }
 });
 
 // Send email function
@@ -79,14 +96,8 @@ const searchUser = async (req, res) => {
       email: 1,
       phoneNumber: 1,
       accountType: 1,
-      currency: 1,
       country: 1,
       countryCode: 1,
-      continent: 1,
-      status_client: 1,
-      uniqueId: 1,
-      address: 1,
-      state: 1,
     };
 
     switch (searchType) {
