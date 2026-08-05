@@ -99,7 +99,7 @@ const searchUser = async (req, res) => {
   "accountType",
   "country",
   "countryCode",
-  "currency",
+
 ];
 
     switch (searchType) {
