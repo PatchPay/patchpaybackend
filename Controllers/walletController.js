@@ -9,7 +9,7 @@ const  sequelize  = require("../config/database");
 const { Op } = require("sequelize");
 
 const bcrypt = require("bcryptjs");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const {
   generateAccountNumber,
   formatAmount,
