@@ -462,17 +462,20 @@ exports.verifyDeposit = async (req, res) => {
 
         if (!transaction) {
           // Create transaction
-          transaction = await Transaction.create({
-            type: "deposit",
-            amount: payment.amount,
-            currency: payment.currency,
-            status: "completed",
-            recipientWallet: wallet.id,
-            recipientId: payment.userId,
-            reference: payment.transactionRef,
-            description: "Deposit via Squad payment gateway",
-            externalReference: payment.squadRef,
-          });
+         transaction = await Transaction.create({
+  type: "deposit",
+  amount: payment.amount,
+  currency: payment.currency,
+  status: "completed",
+  recipientWallet: wallet.id,
+  recipientId: payment.userId,
+
+  reference: payment.transactionRef,
+  idempotencyKey: payment.transactionRef,
+
+  description: "Deposit via Squad payment gateway",
+  externalReference: payment.squadRef,
+});
 
         
 
