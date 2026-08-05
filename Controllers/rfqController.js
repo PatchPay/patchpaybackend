@@ -92,7 +92,6 @@ const searchUser = async (req, res) => {
     let user;
   const requiredFields = [
   "id",
-  "uniqueId",
   "firstName",
   "surname",
   "email",
@@ -110,9 +109,7 @@ const searchUser = async (req, res) => {
       case "phone":
         user = await User.findOne({ where: { phoneNumber: query }, attributes: requiredFields });
         break;
-      case "id":
-        user = await User.findOne({ where: { uniqueId: query }, attributes: requiredFields });
-        break;
+   
       case "name":
         user = await User.findOne({ where: { [Op.or]: [{ firstName: query }, { surname: query }] }, attributes: requiredFields });
         break;
