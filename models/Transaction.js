@@ -1,6 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 
 const Transaction = sequelize.define(
   "Transaction",
@@ -92,7 +92,7 @@ const Transaction = sequelize.define(
   type: DataTypes.STRING,
   allowNull: false,
   unique: true,
-  defaultValue: () => uuidv4(),
+  defaultValue: () => crypto.randomUUID(),
   field: "idempotency_key",
 },
     isUserAccountTransfer: {
