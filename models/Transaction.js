@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
+const { v4: uuidv4 } = require("uuid");
 
 const Transaction = sequelize.define(
   "Transaction",
@@ -87,13 +88,13 @@ const Transaction = sequelize.define(
       unique: true,
     },
 
-    idempotencyKey: {
+  idempotencyKey: {
   type: DataTypes.STRING,
   allowNull: false,
   unique: true,
+  defaultValue: () => uuidv4(),
   field: "idempotency_key",
 },
-
     isUserAccountTransfer: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
