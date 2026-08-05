@@ -90,28 +90,31 @@ const searchUser = async (req, res) => {
 
     // Simple direct query based on searchType with all required fields
     let user;
-    const requiredFields = {
-      firstName: 1,
-      surname: 1,
-      email: 1,
-      phoneNumber: 1,
-      accountType: 1,
-      country: 1,
-      countryCode: 1,
-    };
+  const requiredFields = [
+  "id",
+  "uniqueId",
+  "firstName",
+  "surname",
+  "email",
+  "phoneNumber",
+  "accountType",
+  "country",
+  "countryCode",
+  "currency",
+];
 
     switch (searchType) {
       case "email":
-        user = await User.findOne({ where: { email: query }, attributes: Object.keys(requiredFields) });
+        user = await User.findOne({ where: { email: query }, attributes: requiredFields });
         break;
       case "phone":
-        user = await User.findOne({ where: { phoneNumber: query }, attributes: Object.keys(requiredFields) });
+        user = await User.findOne({ where: { phoneNumber: query }, attributes: requiredFields });
         break;
       case "id":
-        user = await User.findOne({ where: { uniqueId: query }, attributes: Object.keys(requiredFields) });
+        user = await User.findOne({ where: { uniqueId: query }, attributes: requiredFields });
         break;
       case "name":
-        user = await User.findOne({ where: { [Op.or]: [{ firstName: query }, { surname: query }] }, attributes: Object.keys(requiredFields) });
+        user = await User.findOne({ where: { [Op.or]: [{ firstName: query }, { surname: query }] }, attributes: requiredFields });
         break;
       default:
         return res.status(400).json({
