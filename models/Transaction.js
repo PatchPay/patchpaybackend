@@ -87,6 +87,13 @@ const Transaction = sequelize.define(
       unique: true,
     },
 
+    idempotencyKey: {
+  type: DataTypes.STRING,
+  allowNull: false,
+  unique: true,
+  field: "idempotency_key",
+},
+
     isUserAccountTransfer: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
