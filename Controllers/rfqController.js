@@ -294,14 +294,14 @@ const createRFQ = async (req, res) => {
   notificationSent: false,
 });
 
-    await rfq.save();
+
 
     // =========================
     // Quote history
     // =========================
    await QuoteHistory.create({
       quote: rfq.id,
-      user: {
+      user_data: {
         id: recipient.id,
         firstName: recipient.firstName,
         surname: recipient.surname,
