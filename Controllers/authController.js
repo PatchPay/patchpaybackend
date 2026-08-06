@@ -108,7 +108,7 @@ const loginUser = async (req, res) => {
           id: user._id,
           email: user.email,
           firstName: user.firstName,
-          lastName: user.lastName,
+          surname: user.surname,
           phoneNumber: user.phoneNumber,
           uniqueId: user.uniqueId,
           status: user.status
@@ -126,7 +126,7 @@ const loginUser = async (req, res) => {
 
 const registerUser = async (req, res) => {
   try {
-    const { email, password, firstName, lastName, phoneNumber } = req.body;
+    const { email, password, firstName, surname, phoneNumber } = req.body;
 
     // Check if user exists
     const existingUser = await User.findOne({ where: { email } });
@@ -149,7 +149,7 @@ const registerUser = async (req, res) => {
       email,
       password: hashedPassword,
       firstName,
-      lastName,
+      surname,
       phoneNumber,
       uniqueId,
       status: 'Active'
@@ -177,7 +177,7 @@ const registerUser = async (req, res) => {
           id: user._id,
           email: user.email,
           firstName: user.firstName,
-          lastName: user.lastName,
+          surname: user.surname,
           phoneNumber: user.phoneNumber,
           uniqueId: user.uniqueId,
           status: user.status

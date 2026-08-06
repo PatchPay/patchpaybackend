@@ -159,7 +159,7 @@ const getMyEscrows = async (req, res) => {
     const escrows = await Escrow.findAll({ where: { [Op.or]: [
         { creatorId: userId },
         { recipientId: userId }
-      ] }, include: [{ association: 'creator', attributes: ['firstName', 'lastName', 'email', 'phoneNumber'] }, { association: 'recipient', attributes: ['firstName', 'lastName', 'email', 'phoneNumber'] }], order: [['createdAt', 'DESC']] });
+      ] }, include: [{ association: 'creator', attributes: ['firstName', 'surname', 'email', 'phoneNumber'] }, { association: 'recipient', attributes: ['firstName', 'surname', 'email', 'phoneNumber'] }], order: [['createdAt', 'DESC']] });
 
 
     res.status(200).json({
