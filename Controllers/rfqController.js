@@ -428,7 +428,7 @@ const sendInvitation = async (req, res) => {
 
 const getQuotes = async (req, res) => {
   try {
-    const userId = req.user.id;
+   const userId = String(req.user.id);
 
     console.log("Current User ID:", userId);
 
