@@ -477,7 +477,7 @@ const cancelQuote = async (req, res) => {
     }
 
     // Check if the user is the issuer of the quote
-    if (quote.user.id.toString() !== userId.toString()) {
+    if (quote.user_data.id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
         message: "Only the quote issuer can cancel the quote",
@@ -519,7 +519,7 @@ const cancelQuote = async (req, res) => {
 
       // Create notification for issuer
       const issuerNotification = new Notification({
-        recipientId: quote.user.id,
+        recipientId: quote.user_data.id,
         senderId: userId,
         title: "RFQ Cancelled",
         message: `You have cancelled RFQ #${quote.quote_number}`,
@@ -543,13 +543,13 @@ const cancelQuote = async (req, res) => {
         recipientId: quote.destinatary_user.id,
         senderId: userId,
         title: "RFQ Cancelled",
-        message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user.firstName} ${quote.user.surname}`,
+        message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user_data.firstName} ${quote.user_data.surname}`,
         type: "warning",
         category: "system",
         metadata: {
           quoteId: quote.id,
           quoteNumber: quote.quote_number,
-          senderName: `${quote.user.firstName} ${quote.user.surname}`,
+          senderName: `${quote.user_data.firstName} ${quote.user_data.surname}`,
         },
       });
       console.log("STEP: before recipientNotification.save cancelQuote", {
@@ -618,7 +618,7 @@ const acceptQuote = async (req, res) => {
     // ✅ ADD LOGS HERE
     console.log("Logged in user:", userId.toString());
     console.log("Quote recipient:", quote.destinatary_user.id.toString());
-    console.log("Quote creator:", quote.user.id.toString());
+    console.log("Quote creator:", quote.user_data.id.toString());
 
     // Check if the user is the recipient of the quote
     if (quote.destinatary_user.id.toString() !== userId.toString()) {
@@ -664,7 +664,7 @@ const acceptQuote = async (req, res) => {
 
       // Create notification for issuer
       const issuerNotification = new Notification({
-        recipientId: quote.user.id,
+        recipientId: quote.user_data.id,
         senderId: userId,
         title: "RFQ Accepted",
         message: `Your RFQ #${quote.quote_number} has been accepted by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
@@ -709,7 +709,7 @@ const acceptQuote = async (req, res) => {
       console.log("STEP: dispatch acceptance email in background", {
         quoteId: quote.id,
       });
-      User.findByPk(quote.user)
+      quote.user_data.email
         .then((issuer) => {
           if (!issuer?.email) {
             console.error("Acceptance email skipped: issuer email missing", {
@@ -818,7 +818,7 @@ const rejectQuote = async (req, res) => {
 
       // Create notification for issuer
       const issuerNotification = new Notification({
-        recipientId: quote.user.id,
+        recipientId: quote.user_data.id,
         senderId: userId,
         title: "RFQ Rejected",
         message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}${reason ? ". Reason: " + reason : ""}`,
@@ -865,7 +865,7 @@ const rejectQuote = async (req, res) => {
       console.log("STEP: dispatch rejection email in background", {
         quoteId: quote.id,
       });
-      User.findByPk(quote.user)
+      quote.user_data.email
         .then((issuer) => {
           if (!issuer?.email) {
             console.error("Rejection email skipped: issuer email missing", {
@@ -921,7 +921,7 @@ const checkQuoteNotifications = async () => {
         // Create notification for recipient about pending response
         const reminderNotification = new Notification({
           recipientId: quote.destinatary_user.id,
-          senderId: quote.user.id,
+          senderId: quote.user_data.id,
           title: "RFQ Response Required",
           message: `RFQ #${quote.quote_number} requires your response. Please respond within 72 hours.`,
           type: "warning",
@@ -929,7 +929,7 @@ const checkQuoteNotifications = async () => {
           metadata: {
             quoteId: quote.id,
             quoteNumber: quote.quote_number,
-            senderName: `${quote.user.firstName} ${quote.user.surname}`,
+            senderName: `${quote.user_data.firstName} ${quote.user_data.surname}`,
           },
         });
         await reminderNotification.save();
@@ -958,8 +958,8 @@ const checkQuoteNotifications = async () => {
       try {
         // Create deletion notification for issuer
         const issuerDeletionNotification = new Notification({
-          recipientId: quote.user.id,
-          senderId: quote.user.id,
+          recipientId: quote.user_data.id,
+          senderId: quote.user_data.id,
           title: "RFQ Deletion Notice",
           message: `RFQ #${quote.quote_number} will be deleted in 24 hours.`,
           type: "warning",
@@ -974,7 +974,7 @@ const checkQuoteNotifications = async () => {
         // Create deletion notification for recipient
         const recipientDeletionNotification = new Notification({
           recipientId: quote.destinatary_user.id,
-          senderId: quote.user.id,
+          senderId: quote.user_data.id,
           title: "RFQ Deletion Notice",
           message: `RFQ #${quote.quote_number} will be deleted in 24 hours.`,
           type: "warning",
@@ -1030,7 +1030,7 @@ const getQuoteById = async (req, res) => {
 
     // Check if the user has permission to view this quote
     if (
-      quote.user.id.toString() !== userId.toString() &&
+      quote.user_data.id.toString() !== userId.toString() &&
       quote.destinatary_user.id.toString() !== userId.toString()
     ) {
       return res.status(403).json({
