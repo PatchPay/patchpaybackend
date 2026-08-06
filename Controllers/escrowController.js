@@ -154,6 +154,7 @@ const getMyEscrows = async (req, res) => {
 
     const userId = req.user.id;
 
+    console.log("req.user:", req.user);
 
     const escrows = await Escrow.findAll({ where: { [Op.or]: [
         { creatorId: userId },
