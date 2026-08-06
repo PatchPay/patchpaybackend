@@ -19,10 +19,10 @@ const createEscrow = async (req, res) => {
   const transactionDb = await sequelize.transaction();
 
   try {
-    const { quote_id } = req.body;
+    const { quoteid } = req.body;
 
     // Find the quote
-    const quote = await Quote.findByPk(quote_id, { transaction: transactionDb });
+    const quote = await Quote.findByPk(quoteid, { transaction: transactionDb });
     if (!quote) {
       await transactionDb.rollback();
       return res.status(404).json({
@@ -41,7 +41,7 @@ const createEscrow = async (req, res) => {
     }
 
     // Check if escrow already exists for this quote
-    const existingEscrow = await Escrow.findOne({ where: sequelize.where(sequelize.json('metadata.quote_id'), String(quote.id)), transaction: transactionDb });
+    const existingEscrow = await Escrow.findOne({ where: sequelize.where(sequelize.json('metadata.quoteid'), String(quote.id)), transaction: transactionDb });
 
     if (existingEscrow) {
       await transactionDb.rollback();
@@ -69,7 +69,7 @@ const createEscrow = async (req, res) => {
       description: quote.product_description,
       expiryDate, // Add expiry date
       metadata: {
-        quote_id: quote.id,
+        quoteid: quote.id,
         quote_number: quote.quote_number,
         product_quantity: quote.product_quantity,
         delivery_type: quote.delivery_type,
@@ -102,7 +102,7 @@ const createEscrow = async (req, res) => {
 // Get all escrows for a user (either as creator or recipient)
 const getEscrows = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
     const { status, role } = req.query;
 
     let query = {};
@@ -125,8 +125,8 @@ const getEscrows = async (req, res) => {
 
     // Fetch associated quotes for each escrow
     const escrowsWithQuotes = await Promise.all(escrows.map(async (escrow) => {
-      if (escrow.metadata && escrow.metadata.quote_id) {
-        const quote = await Quote.findByPk(escrow.metadata.quote_id, { attributes: ['quote_number', 'status', 'total', 'currency'] });
+      if (escrow.metadata && escrow.metadata.quoteid) {
+        const quote = await Quote.findByPk(escrow.metadata.quoteid, { attributes: ['quote_number', 'status', 'total', 'currency'] });
         return {
           ...escrow.toJSON(),
           quote: quote ? quote.toJSON() : null
@@ -152,7 +152,7 @@ const getEscrows = async (req, res) => {
 const getMyEscrows = async (req, res) => {
   try {
 
-    const userId = req.user._id;
+    const userId = req.user.id;
 
 
     const escrows = await Escrow.findAll({ where: { [Op.or]: [
@@ -193,8 +193,8 @@ const getEscrowById = async (req, res) => {
 
     // Fetch associated quote if it exists
     let quote = null;
-    if (escrow.metadata && escrow.metadata.quote_id) {
-      quote = await Quote.findByPk(escrow.metadata.quote_id, { attributes: ['quote_number', 'status', 'total', 'currency', 'product_description', 'delivery_type', 'trade_type'] });
+    if (escrow.metadata && escrow.metadata.quoteid) {
+      quote = await Quote.findByPk(escrow.metadata.quoteid, { attributes: ['quote_number', 'status', 'total', 'currency', 'product_description', 'delivery_type', 'trade_type'] });
     }
 
     res.json({
@@ -260,8 +260,8 @@ const fundEscrow = async (req, res) => {
     await escrow.save({ transaction: transactionDb });
 
     // If this escrow is linked to a quote, update the quote status
-    if (escrow.metadata && escrow.metadata.quote_id) {
-      const quote = await Quote.findByPk(escrow.metadata.quote_id, { transaction: transactionDb });
+    if (escrow.metadata && escrow.metadata.quoteid) {
+      const quote = await Quote.findByPk(escrow.metadata.quoteid, { transaction: transactionDb });
       if (quote) {
         quote.status = 'Funded';
         await quote.save({ transaction: transactionDb });
@@ -332,8 +332,8 @@ const releaseEscrow = async (req, res) => {
     await escrow.save({ transaction: transactionDb });
 
     // If this escrow is linked to a quote, update the quote status
-    if (escrow.metadata && escrow.metadata.quote_id) {
-      const quote = await Quote.findByPk(escrow.metadata.quote_id, { transaction: transactionDb });
+    if (escrow.metadata && escrow.metadata.quoteid) {
+      const quote = await Quote.findByPk(escrow.metadata.quoteid, { transaction: transactionDb });
       if (quote) {
         quote.status = 'Completed';
         await quote.save({ transaction: transactionDb });

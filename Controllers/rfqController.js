@@ -1052,6 +1052,44 @@ const getQuoteById = async (req, res) => {
   }
 };
 
+const deleteQuote = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+    const userId = req.user.id;
+
+    const quote = await Quote.findByPk(quoteId);
+
+    if (!quote) {
+      return res.status(404).json({
+        success: false,
+        message: "Quote not found",
+      });
+    }
+
+    // Only the creator of the quote can delete it
+    if (quote.user_data.id.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the creator of this quote can delete it",
+      });
+    }
+
+    await quote.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: "Quote deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting quote:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete quote",
+    });
+  }
+};
+
 module.exports = {
   searchUser,
   createRFQ,
@@ -1062,4 +1100,5 @@ module.exports = {
   rejectQuote,
   checkQuoteNotifications,
   getQuoteById,
+  deleteQuote,
 };
