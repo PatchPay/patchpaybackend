@@ -287,7 +287,7 @@ const createRFQ = async (req, res) => {
   delivery_charge: numericDelivery,
   transaction_charges: numericTransaction,
   subtotal: subtotal || total,
-  proof_delivery: Date.now(),
+ proof_delivery: Math.floor(Date.now() / 1000),
   coupon: [],
   exchange_rate: exchangeRate,
   responseNotificationDue: new Date(Date.now() + 72 * 60 * 60 * 1000),
