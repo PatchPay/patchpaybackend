@@ -143,9 +143,9 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
       });
     }
 
-    const rfqCreatorId = quote.user?._id?.toString() || "";
+    const rfqCreatorId = String(quote.user_data.id) || "";
 
-    const loggedInUserId = req.user._id.toString();
+   const loggedInUserId = req.user.id.toString();
 
     console.log("========== INVOICE CHECK ==========");
     console.log("Logged In User:", loggedInUserId);
@@ -204,7 +204,7 @@ exports.initiateInvoicePayment = async (req, res) => {
       });
     }
 
-    if (invoice.requesterId.toString() !== req.user._id.toString()) {
+    if (invoice.requesterId.toString() !== req.user.id.toString()) {
       return res.status(403).json({
         success: false,
         message: "Only the invoice requester can pay this invoice",
@@ -479,7 +479,7 @@ console.log("TX STATUS:", tx.transaction_status);
         }, { transaction: transactionDb });
       }
 
-      let escrow = await Escrow.findOne({ where: sequelize.where(sequelize.json("metadata.invoice_id"), lockedInvoice.id.toString()), transaction: transactionDb });
+      let escrow = await Escrow.findOne({ where: sequelize.where(sequelize.json("metadata.invoiceid"), lockedInvoice.id.toString()), transaction: transactionDb });
 
       let escrowFundingTransaction = lockedInvoice.escrowFundingTransactionId
         ? await Transaction.findByPk(lockedInvoice.escrowFundingTransactionId, { transaction: transactionDb })
@@ -503,7 +503,7 @@ console.log("TX STATUS:", tx.transaction_status);
           recipientId: lockedInvoice.recipientId,
           reference: `${transactionRef}-ESC`,
           externalReference: verification.providerReference,
-          description: `Escrow funding for invoice ${lockedInvoice._id}`,
+          description: `Escrow funding for invoice ${lockedInvoice.id}`,
           isUserAccountTransfer: false,
           paymentMethod: "bank",
           paymentGateway: "SquadCo",
@@ -531,9 +531,9 @@ console.log("TX STATUS:", tx.transaction_status);
           description: lockedInvoice.description,
           expiryDate,
           metadata: {
-            quote_id: quote.id.toString(),
+            quoteid: quote.id.toString(),
             quote_number: quote.quote_number,
-            invoice_id: lockedInvoice.id.toString(),
+            invoiceid: lockedInvoice.id.toString(),
             paymentReference: transactionRef,
             squadRef: verification.providerReference,
             funded: true,
