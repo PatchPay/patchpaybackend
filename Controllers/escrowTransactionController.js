@@ -120,7 +120,7 @@ exports.createTransaction = async (req, res) => {
 exports.getEscrowTransactions = async (req, res) => {
   try {
     const { escrowId } = req.params;
-    const transactions = await EscrowTransaction.findAll({ where: { escrowId }, include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }], order: [['createdAt', 'DESC']] });
+    const transactions = await EscrowTransaction.findAll({ where: { escrowId }, include: [{ association: 'User', attributes: ['firstName', 'surname', 'email'] }], order: [['createdAt', 'DESC']] });
 
     res.status(200).json({
       success: true,
@@ -140,7 +140,7 @@ exports.getEscrowTransactions = async (req, res) => {
 exports.getTransactionByReference = async (req, res) => {
   try {
     const { reference } = req.params;
-    const transaction = await EscrowTransaction.findOne({ where: { transactionReference: reference }, include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }, Escrow] });
+    const transaction = await EscrowTransaction.findOne({ where: { transactionReference: reference }, include: [{ association: 'User', attributes: ['firstName', 'surname', 'email'] }, Escrow] });
 
     if (!transaction) {
       return res.status(404).json({
@@ -167,7 +167,7 @@ exports.getTransactionByReference = async (req, res) => {
 exports.getTransactionById = async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const transaction = await EscrowTransaction.findByPk(transactionId, { include: [{ association: 'User', attributes: ['firstName', 'lastName', 'email'] }, Escrow] });
+    const transaction = await EscrowTransaction.findByPk(transactionId, { include: [{ association: 'User', attributes: ['firstName', 'surname', 'email'] }, Escrow] });
 
     if (!transaction) {
       return res.status(404).json({
