@@ -1,76 +1,83 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { authenticateToken } = require('../middlewares/authMiddleware');
+
 const {
+  createNotification,
   getUserNotifications,
   markAsRead,
   deleteNotification,
   clearAllNotifications,
-  createNotification
-} = require('../Controllers/notificationController');
+} = require("../Controllers/notificationController");
 
-// Get user's notifications
-router.get('/', authenticateToken, getUserNotifications);
+const { authenticateToken } = require("../middlewares/authMiddleware");
+const User = require("../models/User");
 
-// Create notification for authenticated user
-router.post('/', authenticateToken, async (req, res) => {
+// Get notifications
+router.get("/", authenticateToken, getUserNotifications);
+
+// Create notification
+router.post("/", authenticateToken, async (req, res) => {
   try {
     const notification = await createNotification({
       ...req.body,
-      recipientId: req.user._id,
-      senderId: req.user._id
+      senderId: req.user.id,
+      recipientId: req.user.id,
     });
 
     res.status(201).json({
       success: true,
-      data: notification
+      data: notification,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: error.message || 'Error creating notification'
+      message: error.message,
     });
   }
 });
 
-// Create notification for recipient by account number
-router.post('/recipient/:accountNumber', authenticateToken, async (req, res) => {
-  try {
-    const User = require('../models/User');
-    const recipient = await User.findOne({ where: { bankAccount: req.params.accountNumber } });
+// Notify another user
+router.post(
+  "/recipient/:accountNumber",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const recipient = await User.findOne({
+        where: {
+          bankAccount: req.params.accountNumber,
+        },
+      });
 
-    if (!recipient) {
-      return res.status(404).json({
+      if (!recipient) {
+        return res.status(404).json({
+          success: false,
+          message: "Recipient not found",
+        });
+      }
+
+      const notification = await createNotification({
+        ...req.body,
+        senderId: req.user.id,
+        recipientId: recipient.id,
+      });
+
+      res.status(201).json({
+        success: true,
+        data: notification,
+      });
+    } catch (error) {
+      res.status(500).json({
         success: false,
-        message: 'Recipient not found'
+        message: error.message,
       });
     }
-
-    const notification = await createNotification({
-      ...req.body,
-      recipientId: recipient._id,
-      senderId: req.user._id
-    });
-
-    res.status(201).json({
-      success: true,
-      data: notification
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Error creating notification'
-    });
   }
-});
+);
 
-// Mark notification as read
-router.patch('/:id/read', authenticateToken, markAsRead);
+router.patch("/:id/read", authenticateToken, markAsRead);
 
-// Delete notification
-router.delete('/:id', authenticateToken, deleteNotification);
+router.delete("/:id", authenticateToken, deleteNotification);
 
-// Clear all notifications
-router.delete('/', authenticateToken, clearAllNotifications);
+router.delete("/", authenticateToken, clearAllNotifications);
 
-module.exports = router; 
+module.exports = router;
