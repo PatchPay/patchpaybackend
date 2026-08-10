@@ -601,6 +601,84 @@ const setTransactionPin = async (req, res) => {
   }
 };
 
+const changeTransactionPin = async (req, res) => {
+  try {
+    const { currentPin, newPin, confirmPin } = req.body;
+
+    if (!currentPin || !newPin || !confirmPin) {
+      return res.status(400).json({
+        message: "Current PIN, new PIN and confirmation PIN are required",
+      });
+    }
+
+    if (!/^\d{4}$/.test(currentPin)) {
+      return res.status(400).json({
+        message: "Current PIN must be exactly 4 digits",
+      });
+    }
+
+    if (!/^\d{4}$/.test(newPin)) {
+      return res.status(400).json({
+        message: "New PIN must be exactly 4 digits",
+      });
+    }
+
+    if (newPin !== confirmPin) {
+      return res.status(400).json({
+        message: "New PINs do not match",
+      });
+    }
+
+    if (currentPin === newPin) {
+      return res.status(400).json({
+        message: "New PIN must be different from your current PIN",
+      });
+    }
+
+    const user = await User.findByPk(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (!user.hasTransactionPin || !user.transactionPinHash) {
+      return res.status(400).json({
+        message: "You do not have a transaction PIN configured",
+      });
+    }
+
+    // Verify current PIN
+    const isCurrentPinValid = await bcrypt.compare(
+      currentPin,
+      user.transactionPinHash
+    );
+
+    if (!isCurrentPinValid) {
+      return res.status(401).json({
+        message: "Current transaction PIN is incorrect",
+      });
+    }
+
+    // Hash and save new PIN
+    user.transactionPinHash = await bcrypt.hash(newPin, 10);
+    user.hasTransactionPin = true;
+
+    await user.save();
+
+    return res.status(200).json({
+      message: "Transaction PIN changed successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error changing transaction PIN:", error);
+
+    return res.status(500).json({
+      message: "Error changing transaction PIN",
+    });
+  }
+};
+
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -716,6 +794,7 @@ module.exports = {
   getUserProfile,
   updateUserProfile,
   setTransactionPin,
+  changeTransactionPin,
   forgotPassword,
   resetPassword
 };

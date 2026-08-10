@@ -12,6 +12,7 @@ const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 const nodemailer = require("nodemailer");
 const Notification = require("../models/Notification");
+const {sendRFQNotificationEmail} = require("../services/emailService");
 
 const runAfterResponse = (label, task) => {
   setImmediate(async () => {
@@ -347,6 +348,23 @@ const createRFQ = async (req, res) => {
         senderName: `${sender.firstName} ${sender.surname}`,
       },
     })
+
+// =========================
+// Email Notification
+// =========================
+if (recipient.email) {
+  sendRFQNotificationEmail(
+    recipient,
+    sender,
+    rfq
+  ).catch((error) => {
+    console.error(
+      "❌ Failed to send RFQ email notification:",
+      error
+    );
+  });
+}
+
 
     // =========================
     // Response
