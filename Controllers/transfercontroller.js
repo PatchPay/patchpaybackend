@@ -61,7 +61,7 @@ const initiateTransferPayment = async (req, res) => {
       transaction_ref: transactionRef,
       callback_url: callbackUrl,
       metadata: {
-        userId: user._id.toString(),
+        userId: user.id.toString(),
         paymentType: "transfer",
       },
     };
@@ -160,7 +160,7 @@ const internalTransfer = async (req, res) => {
       repeated: result.repeated,
       data: {
         transaction: {
-          id: result.transaction._id,
+          id: result.transaction.id,
           reference: result.transaction.reference,
           amount: result.transaction.amount,
           fee: result.transaction.fee,
@@ -201,7 +201,7 @@ const externalBankTransfer = async (req, res) => {
       retryRequired: result.retryRequired || false,
       data: {
         transfer: {
-          id: result.withdrawal._id,
+          id: result.withdrawal.id,
           transactionRef: result.withdrawal.transactionRef,
           providerReference: result.withdrawal.squadRef,
           amount: result.withdrawal.amount,
@@ -210,7 +210,7 @@ const externalBankTransfer = async (req, res) => {
         },
         transaction: result.transaction
           ? {
-              id: result.transaction._id,
+              id: result.transaction.id,
               reference: result.transaction.reference,
               amount: result.transaction.amount,
               currency: result.transaction.currency,

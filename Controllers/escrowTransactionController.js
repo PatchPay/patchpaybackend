@@ -12,7 +12,7 @@ exports.createTransaction = async (req, res) => {
   try {
     const { amount, type, metadata } = req.body;
     const escrowId = req.params.id;
-    const userId = req.user._id; // From auth middleware
+    const userId = req.user.id; // From auth middleware
 
     // Get the escrow details
     const escrow = await Escrow.findByPk(escrowId, { transaction: transactionDb });
