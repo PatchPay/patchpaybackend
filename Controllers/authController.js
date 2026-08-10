@@ -37,7 +37,7 @@ const loginUser = async (req, res) => {
     // Check if the user has a wallet, create one if not
     const existingWallet = await Wallet.findOne({ where: { userId: user.id } });
     if (!existingWallet) {
-      console.log(`User ${user._id} doesn't have a wallet, creating one...`);
+      console.log(`User ${user.id} doesn't have a wallet, creating one...`);
       
       // CHANGE: Get user data from database to determine proper currency
       const userData = await User.findByPk(user.id);
@@ -76,7 +76,7 @@ const loginUser = async (req, res) => {
         accountType: 'personal'
       });
       
-      console.log(`Wallet created for user ${user._id} with account number ${accountNumber} and currency ${currency}`);
+      console.log(`Wallet created for user ${user.id} with account number ${accountNumber} and currency ${currency}`);
     } else {
       // Check if existing wallet has accountType field, add it if missing
       if (!existingWallet.accountType) {
@@ -89,7 +89,7 @@ const loginUser = async (req, res) => {
 
     // Generate token with 2-hour expiration
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user.id},
       process.env.JWT_SECRET || 'patchpay-secret-key-7d9ac52e',
       { expiresIn: '2h' }
     );
@@ -105,7 +105,7 @@ const loginUser = async (req, res) => {
         token,
         tokenExpiry,
         user: {
-          id: user._id,
+          id: user.id,
           email: user.email,
           firstName: user.firstName,
           surname: user.surname,
@@ -158,7 +158,7 @@ const registerUser = async (req, res) => {
 
     // Generate token with 2-hour expiration
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user.id },
       process.env.JWT_SECRET || 'patchpay-secret-key-7d9ac52e',
       { expiresIn: '2h' }
     );
@@ -174,7 +174,7 @@ const registerUser = async (req, res) => {
         token,
         tokenExpiry,
         user: {
-          id: user._id,
+          id: user.id,
           email: user.email,
           firstName: user.firstName,
           surname: user.surname,
