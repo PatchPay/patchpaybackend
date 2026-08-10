@@ -401,5 +401,10 @@ router.post(
   authenticateToken,
   userController.setTransactionPin,
 );
+router.post(
+  "/transaction-pin/change",
+  authenticateToken,
+  userController.changeTransactionPin
+);
 
 module.exports = router;
