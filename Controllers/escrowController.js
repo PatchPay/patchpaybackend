@@ -218,58 +218,87 @@ const getEscrowById = async (req, res) => {
 
 // Seller marks the escrow as DELIVERED by uploading a delivery-proof image
 
+
 const markEscrowDelivered = async (req, res) => {
-  // The delivery proof MUST be an actual uploaded file.
-  if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+  const escrowId = req.params.id;
+  const userId = req.user.id;
+
+  // ---------------------------------------------------------
+  // 1. DEBUG REQUEST / UPLOADED FILE
+  // ---------------------------------------------------------
+  console.log("[escrow-deliver] REQUEST DEBUG:", {
+    escrowId,
+    userId,
+    hasFile: !!req.file,
+    fileField: req.file?.fieldname,
+    fileName: req.file?.originalname,
+    mimeType: req.file?.mimetype,
+    fileSize: req.file?.size,
+    hasBuffer: !!req.file?.buffer,
+    bufferLength: req.file?.buffer?.length,
+  });
+
+  // ---------------------------------------------------------
+  // 2. Validate uploaded file
+  // ---------------------------------------------------------
+  if (!req.file) {
+    console.log("[escrow-deliver] ❌ NO FILE RECEIVED");
+
     return res.status(400).json({
       success: false,
-      message: "A delivery-proof image file is required",
+      message: "No delivery-proof file was received",
     });
   }
 
-  const escrowId = req.params.id;
-  const userId = req.user.id;
+  if (!req.file.buffer || req.file.buffer.length === 0) {
+    console.log("[escrow-deliver] ❌ FILE BUFFER EMPTY");
+
+    return res.status(400).json({
+      success: false,
+      message: "Delivery-proof file was received but contains no data",
+    });
+  }
 
   let uploaded = null;
   let transactionDb = null;
 
   try {
     // ---------------------------------------------------------
-    // 1. Upload delivery proof to Cloudinary
+    // 3. Upload delivery proof to Cloudinary
     // ---------------------------------------------------------
-   try {
-  uploaded = await uploadImageBuffer(
-    req.file.buffer,
-    "escrow-delivery-proofs"
-  );
+    try {
+      uploaded = await uploadImageBuffer(
+        req.file.buffer,
+        "escrow-delivery-proofs"
+      );
 
-  console.log("[escrow-deliver] Cloudinary upload successful:", {
-    url: uploaded?.url,
-    publicId: uploaded?.publicId,
-  });
-} catch (error) {
-  console.error("========================================");
-  console.error("[escrow-deliver] CLOUDINARY UPLOAD ERROR");
-  console.error("message:", error.message);
-  console.error("name:", error.name);
-  console.error("stack:", error.stack);
-  console.error("response:", error.response?.data);
-  console.error("========================================");
+      console.log("[escrow-deliver] Cloudinary upload successful:", {
+        url: uploaded?.url,
+        publicId: uploaded?.publicId,
+      });
+    } catch (error) {
+      console.error("========================================");
+      console.error("[escrow-deliver] CLOUDINARY UPLOAD ERROR");
+      console.error("message:", error.message);
+      console.error("name:", error.name);
+      console.error("stack:", error.stack);
+      console.error("response:", error.response?.data);
+      console.error("========================================");
 
-  return res.status(502).json({
-    success: false,
-    message: "Failed to upload delivery-proof image",
-    error: error.message,
-  });
-}
+      return res.status(502).json({
+        success: false,
+        message: "Failed to upload delivery-proof image",
+        error: error.message,
+      });
+    }
 
     // ---------------------------------------------------------
-    // 2. Start transaction
+    // 4. Start database transaction
     // ---------------------------------------------------------
     transactionDb = await sequelize.transaction();
 
     // ---------------------------------------------------------
-    // 3. Fetch escrow with row lock
+    // 5. Fetch escrow with row lock
     // ---------------------------------------------------------
     const escrow = await Escrow.findByPk(escrowId, {
       transaction: transactionDb,
@@ -289,7 +318,7 @@ const markEscrowDelivered = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 4. Authorization check
+    // 6. Authorization check
     // Seller = recipientId
     // ---------------------------------------------------------
     const creatorMatch = String(userId) === String(escrow.creatorId);
@@ -318,7 +347,21 @@ const markEscrowDelivered = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 5. Check escrow state
+    // 7. Log complete escrow state
+    // ---------------------------------------------------------
+    console.log("[escrow-deliver] ESCROW STATE:", {
+      id: escrow.id,
+      status: escrow.status,
+      creatorId: escrow.creatorId,
+      recipientId: escrow.recipientId,
+      userId,
+      deliveryProofUrl: escrow.deliveryProofUrl,
+      deliveryProofPublicId: escrow.deliveryProofPublicId,
+      sellerDeliveredAt: escrow.sellerDeliveredAt,
+    });
+
+    // ---------------------------------------------------------
+    // 8. Check escrow state
     // ---------------------------------------------------------
     if (escrow.status !== "FUNDED") {
       await transactionDb.rollback();
@@ -333,7 +376,7 @@ const markEscrowDelivered = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 6. Prevent duplicate delivery proof
+    // 9. Prevent duplicate delivery proof
     // ---------------------------------------------------------
     if (escrow.deliveryProofUrl || escrow.deliveryProofPublicId) {
       await transactionDb.rollback();
@@ -348,7 +391,7 @@ const markEscrowDelivered = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 7. Mark escrow as delivered
+    // 10. Mark escrow as delivered
     // ---------------------------------------------------------
     const deliveredAt = new Date();
 
@@ -365,7 +408,7 @@ const markEscrowDelivered = async (req, res) => {
     );
 
     // ---------------------------------------------------------
-    // 8. Commit transaction
+    // 11. Commit transaction
     // ---------------------------------------------------------
     await transactionDb.commit();
     transactionDb = null;
@@ -386,7 +429,7 @@ const markEscrowDelivered = async (req, res) => {
     });
   } catch (error) {
     // ---------------------------------------------------------
-    // 9. Rollback database transaction if still active
+    // 12. Rollback database transaction if still active
     // ---------------------------------------------------------
     if (transactionDb) {
       try {
@@ -400,7 +443,7 @@ const markEscrowDelivered = async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 10. Remove Cloudinary image if DB operation failed
+    // 13. Remove Cloudinary image if DB operation failed
     // ---------------------------------------------------------
     if (uploaded?.publicId) {
       try {
@@ -424,6 +467,8 @@ const markEscrowDelivered = async (req, res) => {
     });
   }
 };
+
+
 
 
 // Buyer confirms receipt — this triggers the automatic, atomic fund release
