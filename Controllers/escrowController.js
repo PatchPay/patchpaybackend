@@ -237,22 +237,31 @@ const markEscrowDelivered = async (req, res) => {
     // ---------------------------------------------------------
     // 1. Upload delivery proof to Cloudinary
     // ---------------------------------------------------------
-    try {
-      uploaded = await uploadImageBuffer(
-        req.file.buffer,
-        "escrow-delivery-proofs"
-      );
-    } catch (error) {
-      console.error(
-        "[escrow-deliver] Cloudinary upload failed:",
-        error.message
-      );
+   try {
+  uploaded = await uploadImageBuffer(
+    req.file.buffer,
+    "escrow-delivery-proofs"
+  );
 
-      return res.status(502).json({
-        success: false,
-        message: "Failed to upload delivery-proof image",
-      });
-    }
+  console.log("[escrow-deliver] Cloudinary upload successful:", {
+    url: uploaded?.url,
+    publicId: uploaded?.publicId,
+  });
+} catch (error) {
+  console.error("========================================");
+  console.error("[escrow-deliver] CLOUDINARY UPLOAD ERROR");
+  console.error("message:", error.message);
+  console.error("name:", error.name);
+  console.error("stack:", error.stack);
+  console.error("response:", error.response?.data);
+  console.error("========================================");
+
+  return res.status(502).json({
+    success: false,
+    message: "Failed to upload delivery-proof image",
+    error: error.message,
+  });
+}
 
     // ---------------------------------------------------------
     // 2. Start transaction
