@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const axios = require("axios");
-const multer = require("multer");
+const path = require("path");
 require("dotenv").config();
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
@@ -58,6 +58,7 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 /* ===========================
    ROOT / HEALTH ROUTES
@@ -127,37 +128,6 @@ app.use("/api/transfers", transferRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled request error:", err);
-
-  // Route-level uploadDeliveryProof handles delivery uploads itself. Keep this
-  // fallback so any multipart/Multer error that reaches the application error
-  // handler is still a JSON response rather than an opaque connection failure.
-  if (err instanceof multer.MulterError) {
-    if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(413).json({
-        success: false,
-        message: "Delivery proof image must be 5MB or smaller",
-      });
-    }
-
-    if (err.code === "LIMIT_UNEXPECTED_FILE") {
-      return res.status(400).json({
-        success: false,
-        message: "Unexpected file field. Use deliveryProof for the image.",
-      });
-    }
-
-    return res.status(400).json({
-      success: false,
-      message: `Upload error: ${err.message}`,
-    });
-  }
-
-  if (err.code === "UNSUPPORTED_FILE_TYPE") {
-    return res.status(415).json({
-      success: false,
-      message: err.message || "Unsupported file type",
-    });
-  }
 
   return res.status(err.status || err.statusCode || 500).json({
     success: false,

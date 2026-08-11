@@ -13,8 +13,21 @@ const {
   transactionNeedsUPRN
 } = require('../utils/paymentUtils');
 const { ApiError } = require('../utils/ApiError');
-const { uploadImageBuffer, destroyImage } = require('../services/upload.service');
+const fs = require('fs');
 const { confirmReceiptAndRelease } = require('../services/escrowRelease.service');
+
+const SAFE_ESCROW_USER_ATTRIBUTES = [
+  'id',
+  'accountType',
+  'firstName',
+  'middleName',
+  'surname',
+  'email',
+  'phoneNumber',
+  'businessName',
+  'industry',
+  'companyAddress',
+];
 
 // Create a new escrow from a quote
 const createEscrow = async (req, res) => {
@@ -123,7 +136,7 @@ const getEscrows = async (req, res) => {
       query.status = status;
     }
 
-    const escrows = await Escrow.findAll({ where: query, include: [{ association: 'creator', attributes: ['firstName', 'surname', 'email'] }, { association: 'recipient', attributes: ['firstName', 'surname', 'email'] }], order: [['createdAt', 'DESC']] });
+    const escrows = await Escrow.findAll({ where: query, include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }], order: [['createdAt', 'DESC']] });
 
     // Fetch associated quotes for each escrow
     const escrowsWithQuotes = await Promise.all(escrows.map(async (escrow) => {
@@ -156,12 +169,10 @@ const getMyEscrows = async (req, res) => {
 
     const userId = req.user.id;
 
-    console.log("req.user:", req.user);
-
     const escrows = await Escrow.findAll({ where: { [Op.or]: [
         { creatorId: userId },
         { recipientId: userId }
-      ] }, include: [{ association: 'creator', attributes: ['firstName', 'surname', 'email', 'phoneNumber'] }, { association: 'recipient', attributes: ['firstName', 'surname', 'email', 'phoneNumber'] }], order: [['createdAt', 'DESC']] });
+      ] }, include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }], order: [['createdAt', 'DESC']] });
 
 
     res.status(200).json({
@@ -185,7 +196,7 @@ const getMyEscrows = async (req, res) => {
 // Get a single escrow by ID
 const getEscrowById = async (req, res) => {
   try {
-    const escrow = await Escrow.findByPk(req.params.id, { include: [{ association: 'creator' }, { association: 'recipient' }, { association: 'fundingTransaction' }, { association: 'releaseTransaction' }, { association: 'refundTransaction' }] });
+    const escrow = await Escrow.findByPk(req.params.id, { include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'fundingTransaction' }, { association: 'releaseTransaction' }, { association: 'refundTransaction' }] });
 
     if (!escrow) {
       return res.status(404).json({
@@ -216,26 +227,43 @@ const getEscrowById = async (req, res) => {
   }
 };
 
-// Seller marks the escrow as DELIVERED by uploading a delivery-proof image
+// Seller marks the escrow as DELIVERED by uploading a locally stored proof.
+const removeDeliveryProofFile = async (filePath, reason) => {
+  if (!filePath) return;
+
+  try {
+    await fs.promises.unlink(filePath);
+    console.log("[escrow-deliver] CLEANUP", { reason, filePath });
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error("[escrow-deliver] CLEANUP FAILED", {
+        reason,
+        filePath,
+        message: error.message,
+      });
+    }
+  }
+};
 
 
 const markEscrowDelivered = async (req, res) => {
   const escrowId = req.params.id;
   const userId = req.user.id;
+  const uploadedFilePath = req.file?.path;
 
   // ---------------------------------------------------------
   // 1. DEBUG REQUEST / UPLOADED FILE
   // ---------------------------------------------------------
-  console.log("[escrow-deliver] Entering markEscrowDelivered:", {
+  console.log("[escrow-deliver] REQUEST DEBUG:", {
     escrowId,
     userId,
     hasFile: !!req.file,
     fileField: req.file?.fieldname,
     fileName: req.file?.originalname,
+    storedFileName: req.file?.filename,
     mimeType: req.file?.mimetype,
     fileSize: req.file?.size,
-    hasBuffer: !!req.file?.buffer,
-    bufferLength: req.file?.buffer?.length,
+    filePath: req.file?.path,
   });
 
   // ---------------------------------------------------------
@@ -246,55 +274,23 @@ const markEscrowDelivered = async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      message: "No delivery-proof file was received",
+      message: "A deliveryProof image file is required",
     });
   }
 
-  if (!req.file.buffer || req.file.buffer.length === 0) {
-    console.log("[escrow-deliver] ❌ FILE BUFFER EMPTY");
+  if (!req.file.path) {
+    console.log("[escrow-deliver] FILE PATH MISSING");
 
     return res.status(400).json({
       success: false,
-      message: "Delivery-proof file was received but contains no data",
+      message: "Delivery-proof file was received but could not be stored",
     });
   }
 
-  let uploaded = null;
   let transactionDb = null;
 
   try {
-    // ---------------------------------------------------------
-    // 3. Upload delivery proof to Cloudinary
-    // ---------------------------------------------------------
-    try {
-      uploaded = await uploadImageBuffer(
-        req.file.buffer,
-        "escrow-delivery-proofs"
-      );
-
-      console.log("[escrow-deliver] Cloudinary upload successful:", {
-        url: uploaded?.url,
-        publicId: uploaded?.publicId,
-      });
-    } catch (error) {
-      console.error("========================================");
-      console.error("[escrow-deliver] CLOUDINARY UPLOAD ERROR");
-      console.error("message:", error.message);
-      console.error("name:", error.name);
-      console.error("stack:", error.stack);
-      console.error("response:", error.response?.data);
-      console.error("========================================");
-
-      return res.status(502).json({
-        success: false,
-        message: "Failed to upload delivery-proof image",
-        error: error.message,
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 4. Start database transaction
-    // ---------------------------------------------------------
+    // Start the transaction only after Multer has safely stored the file.
     transactionDb = await sequelize.transaction();
 
     // ---------------------------------------------------------
@@ -309,7 +305,7 @@ const markEscrowDelivered = async (req, res) => {
       await transactionDb.rollback();
       transactionDb = null;
 
-      await destroyImage(uploaded.publicId);
+      await removeDeliveryProofFile(uploadedFilePath, "escrow not found");
 
       return res.status(404).json({
         success: false,
@@ -338,7 +334,7 @@ const markEscrowDelivered = async (req, res) => {
       await transactionDb.rollback();
       transactionDb = null;
 
-      await destroyImage(uploaded.publicId);
+      await removeDeliveryProofFile(uploadedFilePath, "seller authorization failed");
 
       return res.status(403).json({
         success: false,
@@ -367,7 +363,7 @@ const markEscrowDelivered = async (req, res) => {
       await transactionDb.rollback();
       transactionDb = null;
 
-      await destroyImage(uploaded.publicId);
+      await removeDeliveryProofFile(uploadedFilePath, "invalid escrow state");
 
       return res.status(400).json({
         success: false,
@@ -382,7 +378,7 @@ const markEscrowDelivered = async (req, res) => {
       await transactionDb.rollback();
       transactionDb = null;
 
-      await destroyImage(uploaded.publicId);
+      await removeDeliveryProofFile(uploadedFilePath, "duplicate delivery proof");
 
       return res.status(409).json({
         success: false,
@@ -397,8 +393,8 @@ const markEscrowDelivered = async (req, res) => {
 
     await escrow.update(
       {
-        deliveryProofUrl: uploaded.url,
-        deliveryProofPublicId: uploaded.publicId,
+        deliveryProofUrl: `/uploads/delivery-proofs/${req.file.filename}`,
+        deliveryProofPublicId: null,
         sellerDeliveredAt: deliveredAt,
         status: "DELIVERED",
       },
@@ -413,9 +409,12 @@ const markEscrowDelivered = async (req, res) => {
     await transactionDb.commit();
     transactionDb = null;
 
-    console.log(
-      `[escrow-deliver] Escrow ${escrow.id} marked DELIVERED by seller ${userId}`
-    );
+    console.log("[escrow-deliver] DELIVERY SUCCESS", {
+      escrowId: escrow.id,
+      userId,
+      status: escrow.status,
+      deliveryProofUrl: escrow.deliveryProofUrl,
+    });
 
     return res.status(200).json({
       success: true,
@@ -442,19 +441,7 @@ const markEscrowDelivered = async (req, res) => {
       }
     }
 
-    // ---------------------------------------------------------
-    // 13. Remove Cloudinary image if DB operation failed
-    // ---------------------------------------------------------
-    if (uploaded?.publicId) {
-      try {
-        await destroyImage(uploaded.publicId);
-      } catch (cloudinaryError) {
-        console.error(
-          "[escrow-deliver] Failed to remove uploaded image:",
-          cloudinaryError.message
-        );
-      }
-    }
+    await removeDeliveryProofFile(uploadedFilePath, "database transaction failed");
 
     console.error(
       "[escrow-deliver] Error marking escrow delivered:",
