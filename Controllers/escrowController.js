@@ -226,7 +226,7 @@ const markEscrowDelivered = async (req, res) => {
   // ---------------------------------------------------------
   // 1. DEBUG REQUEST / UPLOADED FILE
   // ---------------------------------------------------------
-  console.log("[escrow-deliver] REQUEST DEBUG:", {
+  console.log("[escrow-deliver] Entering markEscrowDelivered:", {
     escrowId,
     userId,
     hasFile: !!req.file,
