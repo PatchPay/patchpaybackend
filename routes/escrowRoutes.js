@@ -6,12 +6,14 @@ const {
   checkEscrowPermission,
   checkEscrowAction,
 } = require("../middlewares/escrowMiddleware");
+const { uploadDeliveryProof } = require("../middlewares/uploadMiddleware");
 const {
   createEscrow,
   getEscrows,
   getEscrowById,
   getMyEscrows,
-  fundEscrow,
+  markEscrowDelivered,
+  confirmEscrowReceipt,
   releaseEscrow,
   refundEscrow,
   disputeEscrow,
@@ -30,16 +32,28 @@ router.get('/my-escrow', authenticateToken, getMyEscrows)
 // Get a specific escrow by ID
 router.get("/:id", authenticateToken, checkEscrowPermission, getEscrowById);
 
-// Fund an escrow
+// Seller submits delivery proof (image) -> escrow becomes DELIVERED.
+// Authorization/state are checked BEFORE multer parses the multipart body,
+// so an unauthorized or wrong-state request never uploads a 5MB file.
 router.post(
-  "/:id/fund",
+  "/:id/deliver",
   authenticateToken,
   checkEscrowPermission,
-  checkEscrowAction("fund"),
-  fundEscrow,
+  checkEscrowAction("deliver"),
+  uploadDeliveryProof,
+  markEscrowDelivered,
 );
 
-// Release escrow funds
+// Buyer confirms receipt -> triggers automatic atomic release to the seller.
+router.post(
+  "/:id/confirm-receipt",
+  authenticateToken,
+  checkEscrowPermission,
+  checkEscrowAction("confirm-receipt"),
+  confirmEscrowReceipt,
+);
+
+// Release escrow funds (hardened: same guarded atomic release path)
 router.post(
   "/:id/release",
   authenticateToken,

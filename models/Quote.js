@@ -56,7 +56,9 @@ const Quote = sequelize.define(
         "Pending",
         "Accepted",
         "Rejected",
-        "Cancelled"
+        "Cancelled",
+        "Funded",
+        "Completed"
       ),
       defaultValue: "Pending",
     },
