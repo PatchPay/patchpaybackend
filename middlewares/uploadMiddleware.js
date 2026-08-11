@@ -36,7 +36,7 @@ const upload = multer({
 /**
  * Middleware that parses a single `deliveryProof` image field and maps multer
  * errors to clean JSON responses:
- *   - file too large           -> 400
+ *   - file too large           -> 413
  *   - unsupported file type     -> 415
  *   - any other multer error    -> 400
  *
@@ -46,16 +46,57 @@ const upload = multer({
 const uploadDeliveryProof = (req, res, next) => {
   const handler = upload.single("deliveryProof");
 
+  console.log("[escrow-deliver] Entering uploadDeliveryProof:", {
+    escrowId: req.params.id,
+    userId: req.user?.id,
+    contentType: req.get("content-type"),
+  });
+
   handler(req, res, (err) => {
-    if (!err) {
+    if (!err && req.file) {
+      console.log("[escrow-deliver] Multer upload successful:", {
+        escrowId: req.params.id,
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        hasBuffer: Buffer.isBuffer(req.file.buffer),
+      });
+
       return next();
     }
 
+    if (!err) {
+      console.warn("[escrow-deliver] Multer completed without a file", {
+        escrowId: req.params.id,
+        contentType: req.get("content-type"),
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: "A deliveryProof image file is required",
+      });
+    }
+
+    console.warn("[escrow-deliver] Multer upload error:", {
+      escrowId: req.params.id,
+      code: err.code,
+      field: err.field,
+      message: err.message,
+    });
+
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
-        return res.status(400).json({
+        return res.status(413).json({
           success: false,
           message: "Delivery proof image must be 5MB or smaller",
+        });
+      }
+
+      if (err.code === "LIMIT_UNEXPECTED_FILE") {
+        return res.status(400).json({
+          success: false,
+          message: "Unexpected file field. Use deliveryProof for the image.",
         });
       }
 
