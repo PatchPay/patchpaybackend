@@ -6,7 +6,10 @@ const {
   checkEscrowPermission,
   checkEscrowAction,
 } = require("../middlewares/escrowMiddleware");
-const { uploadDeliveryProof } = require("../middlewares/uploadMiddleware");
+const {
+  uploadDeliveryProof,
+  handleDeliveryUploadError,
+} = require("../middlewares/deliveryUploadMiddleware");
 const {
   createEscrow,
   getEscrows,
@@ -41,6 +44,7 @@ router.post(
   checkEscrowPermission,
   checkEscrowAction("deliver"),
   uploadDeliveryProof,
+  handleDeliveryUploadError,
   markEscrowDelivered,
 );
 
