@@ -55,6 +55,8 @@ const Escrow = sequelize.define(
         "CREATED",
         "PARTIALLY_FUNDED",
         "FUNDED",
+        "DELIVERED",
+        "RECEIVED",
         "RELEASED",
         "REFUNDED",
         "DISPUTED",
@@ -95,6 +97,39 @@ const Escrow = sequelize.define(
         model: "transactions",
         key: "id",
       },
+    },
+
+    // ----- Delivery proof (seller uploads image to mark DELIVERED) -----
+    deliveryProofUrl: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "delivery_proof_url",
+    },
+
+    deliveryProofPublicId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "delivery_proof_public_id",
+    },
+
+    sellerDeliveredAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "seller_delivered_at",
+    },
+
+    // ----- Buyer receipt confirmation (triggers automatic release) -----
+    buyerReceived: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: "buyer_received",
+    },
+
+    buyerReceivedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "buyer_received_at",
     },
 
     conditions: {

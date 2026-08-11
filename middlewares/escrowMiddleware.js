@@ -104,10 +104,53 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "created") {
+          if (escrow.status !== "CREATED") {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be funded in its current state",
+            });
+          }
+
+          break;
+
+        case "deliver":
+          // Only the recipient (seller) can submit delivery proof
+          if (!isRecipient) {
+            return res.status(403).json({
+              success: false,
+              message: "Only the seller can submit delivery proof",
+            });
+          }
+
+          if (escrow.status !== "FUNDED") {
+            return res.status(400).json({
+              success: false,
+              message: "Delivery proof can only be submitted for a funded escrow",
+            });
+          }
+
+          break;
+
+        case "confirm-receipt":
+          // Only the creator (buyer) can confirm receipt
+          if (!isCreator) {
+            return res.status(403).json({
+              success: false,
+              message: "Only the buyer can confirm receipt",
+            });
+          }
+
+          if (escrow.status !== "DELIVERED") {
+            return res.status(400).json({
+              success: false,
+              message: "Receipt can only be confirmed after the seller marks the escrow as delivered",
+            });
+          }
+
+          if (!escrow.deliveryProofUrl || !escrow.sellerDeliveredAt) {
+            return res.status(400).json({
+              success: false,
+              message: "Delivery proof has not been submitted by the seller",
             });
           }
 
@@ -122,7 +165,7 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "funded") {
+          if (escrow.status !== "FUNDED" && escrow.status !== "DELIVERED") {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be released in its current state",
@@ -140,7 +183,7 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "funded") {
+          if (escrow.status !== "FUNDED") {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be refunded in its current state",
@@ -158,7 +201,7 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "funded") {
+          if (escrow.status !== "FUNDED" && escrow.status !== "DELIVERED") {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be disputed in its current state",
@@ -176,7 +219,7 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "created") {
+          if (escrow.status !== "CREATED") {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be cancelled in its current state",
