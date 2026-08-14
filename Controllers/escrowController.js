@@ -55,6 +55,14 @@ const createEscrow = async (req, res) => {
       });
     }
 
+    if (String(quote.user_data?.id) !== String(req.user.id)) {
+      await transactionDb.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Only the seller can create escrow for this RFQ'
+      });
+    }
+
     // Check if escrow already exists for this quote
     const existingEscrow = await Escrow.findOne({ where: sequelize.where(sequelize.json('metadata.quoteid'), String(quote.id)), transaction: transactionDb });
 
@@ -67,7 +75,7 @@ const createEscrow = async (req, res) => {
     }
 
     // Generate escrow UPRN
-    const escrowUprn = await generateUPRN(quote.user, 'escrow_release');
+    const escrowUprn = await generateUPRN(quote.user_data.id, 'escrow_release');
 
     // Set expiry date to 30 days from now
     const expiryDate = new Date();
@@ -75,8 +83,8 @@ const createEscrow = async (req, res) => {
 
     // Create the escrow
     const escrow = await Escrow.create({
-      creatorId: quote.user,
-      recipientId: quote.destinatary_user,
+      creatorId: quote.user_data.id,
+      recipientId: quote.destinatary_user.id,
       amount: quote.total, // Use the quote's total amount
       currency: quote.currency,
       escrowUprn,
@@ -315,7 +323,7 @@ const markEscrowDelivered = async (req, res) => {
 
     // ---------------------------------------------------------
     // 6. Authorization check
-    // Seller = recipientId
+    // Seller = creatorId
     // ---------------------------------------------------------
     const creatorMatch = String(userId) === String(escrow.creatorId);
     const recipientMatch = String(userId) === String(escrow.recipientId);
@@ -330,7 +338,7 @@ const markEscrowDelivered = async (req, res) => {
       status: escrow.status,
     });
 
-    if (!recipientMatch) {
+    if (!creatorMatch) {
       await transactionDb.rollback();
       transactionDb = null;
 

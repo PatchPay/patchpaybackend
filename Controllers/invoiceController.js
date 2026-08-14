@@ -9,8 +9,9 @@ const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
 
 const buildInvoiceFromAcceptedQuote = async (quote, transaction = null) => {
-  const requesterId = quote.user?.id || quote.user || quote.user_data?.id;
-  const recipientId = quote.destinatary_user?.id || quote.destinatary_user?.id || quote.destinatary_user?.userId;
+  // The RFQ creator is the seller; the recipient is the buyer.
+  const requesterId = quote.user_data?.id;
+  const recipientId = quote.destinatary_user?.id;
 
   if (!requesterId || !recipientId) {
     const error = new Error("Quote is missing requester or recipient data");
@@ -150,14 +151,14 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
     console.log("========== INVOICE CHECK ==========");
     console.log("Logged In User:", loggedInUserId);
     console.log("RFQ Creator:", rfqCreatorId);
-    console.log("Quote User Object:", quote.user);
+    console.log("RFQ Seller:", quote.user_data?.id);
     console.log("===================================");
 
     // Only RFQ creator can generate invoice
     if (rfqCreatorId !== loggedInUserId) {
       return res.status(403).json({
         success: false,
-        message: "Only the RFQ creator can generate an invoice",
+        message: "Only the seller can generate the invoice",
       });
     }
 
@@ -171,7 +172,7 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
     if (quote.status !== "Accepted") {
       return res.status(400).json({
         success: false,
-        message: "Invoice can only be created for an accepted quote",
+        message: "RFQ must be accepted before an invoice can be generated",
       });
     }
 
@@ -204,10 +205,10 @@ exports.initiateInvoicePayment = async (req, res) => {
       });
     }
 
-    if (invoice.requesterId.toString() !== req.user.id.toString()) {
+    if (invoice.recipientId.toString() !== req.user.id.toString()) {
       return res.status(403).json({
         success: false,
-        message: "Only the invoice requester can pay this invoice",
+        message: "Only the buyer can pay this invoice",
       });
     }
 
@@ -218,11 +219,11 @@ exports.initiateInvoicePayment = async (req, res) => {
       });
     }
 
-    const requester = await User.findByPk(invoice.requesterId);
-    if (!requester) {
+    const buyer = await User.findByPk(invoice.recipientId);
+    if (!buyer) {
       return res.status(404).json({
         success: false,
-        message: "Invoice requester not found",
+        message: "Invoice buyer not found",
       });
     }
 
@@ -233,7 +234,7 @@ exports.initiateInvoicePayment = async (req, res) => {
 
     const payment = await squadService.initiateCollection({
       amount: invoice.amount,
-      email: requester.email,
+      email: buyer.email,
       currency: invoice.currency,
       transactionRef: paymentReference,
       callbackUrl,
@@ -460,8 +461,8 @@ console.log("TX STATUS:", tx.transaction_status);
             total: lockedInvoice.amount,
           currency: lockedInvoice.currency,
           status: "success",
-          senderId: lockedInvoice.requesterId,
-          recipientId: lockedInvoice.recipientId,
+          senderId: lockedInvoice.recipientId,
+          recipientId: lockedInvoice.requesterId,
           reference: transactionRef,
           externalReference: verification.providerReference,
           description: `Invoice payment for RFQ #${quote.quote_number}`,
@@ -499,8 +500,8 @@ console.log("TX STATUS:", tx.transaction_status);
           total: lockedInvoice.amount,
           currency: lockedInvoice.currency,
           status: "success",
-          senderId: lockedInvoice.requesterId,
-          recipientId: lockedInvoice.recipientId,
+          senderId: lockedInvoice.recipientId,
+          recipientId: lockedInvoice.requesterId,
           reference: `${transactionRef}-ESC`,
           externalReference: verification.providerReference,
           description: `Escrow funding for invoice ${lockedInvoice.id}`,
@@ -519,6 +520,7 @@ console.log("TX STATUS:", tx.transaction_status);
         }, { transaction: transactionDb });
 
         escrow = await Escrow.create({
+          // Escrow ownership remains seller (creator) -> buyer (recipient).
           creatorId: lockedInvoice.requesterId,
           recipientId: lockedInvoice.recipientId,
           amount: lockedInvoice.amount,
@@ -590,6 +592,16 @@ exports.getInvoiceById = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Invoice not found",
+      });
+    }
+
+    if (
+      String(invoice.requesterId) !== String(req.user.id) &&
+      String(invoice.recipientId) !== String(req.user.id)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this invoice",
       });
     }
 

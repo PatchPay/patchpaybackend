@@ -6,6 +6,7 @@ const {
   createRFQ,
   sendInvitation,
   getQuotes,
+  getReceivedQuotes,
   cancelQuote,
   acceptQuote,
   rejectQuote,
@@ -24,6 +25,8 @@ router.post("/invite", authenticateToken, sendInvitation);
 
 // Get quotes for the authenticated user
 router.get("/quotes", authenticateToken, getQuotes);
+
+router.get("/quotes/received", authenticateToken, getReceivedQuotes);
 
 // Get a single quote by ID
 router.get("/quotes/:quoteId", authenticateToken, getQuoteById);
