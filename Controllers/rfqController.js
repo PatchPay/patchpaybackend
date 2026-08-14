@@ -193,6 +193,15 @@ const createRFQ = async (req, res) => {
       });
     }
 
+    // The authenticated user is always the seller/creator. No client-supplied
+    // creator field is used, and an RFQ cannot be sent to its own seller.
+    if (String(sender.id) === String(recipient.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Seller and buyer must be different users",
+      });
+    }
+
     // console.log("Sender User:", sender);
     // console.log("Recipient User:", recipient);
 
@@ -303,10 +312,10 @@ const createRFQ = async (req, res) => {
    await QuoteHistory.create({
       quote: rfq.id,
       user_data: {
-        id: recipient.id,
-        firstName: recipient.firstName,
-        surname: recipient.surname,
-        phoneNumber: recipient.phoneNumber,
+        id: sender.id,
+        firstName: sender.firstName,
+        surname: sender.surname,
+        phoneNumber: sender.phoneNumber,
       },
       status: "Pending",
       action: "Created",
@@ -475,6 +484,26 @@ const getQuotes = async (req, res) => {
   }
 };
 
+// The buyer's actionable RFQs. The existing combined /quotes endpoint is
+// preserved for backwards compatibility.
+const getReceivedQuotes = async (req, res) => {
+  try {
+    const userId = String(req.user.id);
+    const quotes = await Quote.findAll({
+      where: sequelize.where(sequelize.json("destinatary_user.id"), userId),
+      order: [["createdAt", "DESC"]],
+    });
+
+    return res.status(200).json({ success: true, data: quotes });
+  } catch (error) {
+    console.error("Error fetching received quotes:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch received quotes",
+    });
+  }
+};
+
 // Cancel a quote
 const cancelQuote = async (req, res) => {
   try {
@@ -523,7 +552,7 @@ const cancelQuote = async (req, res) => {
       // Create quote history entry
       const quoteHistory = new QuoteHistory({
         quote: quote.id,
-        user: userId,
+        user_data: quote.user_data,
         status: "Cancelled",
         action: "Cancelled by issuer",
       });
@@ -667,7 +696,7 @@ const acceptQuote = async (req, res) => {
       // Create quote history entry
       const quoteHistory = new QuoteHistory({
         quote: quote.id,
-        user: userId,
+        user_data: quote.destinatary_user,
         status: "Accepted",
         action: "Accepted by recipient",
         deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -821,7 +850,7 @@ const rejectQuote = async (req, res) => {
       // Create quote history entry
       const quoteHistory = new QuoteHistory({
         quote: quote.id,
-        user: userId,
+        user_data: quote.destinatary_user,
         status: "Rejected",
         action: `Rejected by recipient${reason ? ": " + reason : ""}`,
         deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -1113,6 +1142,7 @@ module.exports = {
   createRFQ,
   sendInvitation,
   getQuotes,
+  getReceivedQuotes,
   cancelQuote,
   acceptQuote,
   rejectQuote,

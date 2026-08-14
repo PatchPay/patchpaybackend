@@ -96,11 +96,11 @@ const checkEscrowAction = (actionType) => {
 
       switch (actionType) {
         case "fund":
-          // Only creator can fund
-          if (!isCreator) {
+          // Buyer (recipient) provides the funds.
+          if (!isRecipient) {
             return res.status(403).json({
               success: false,
-              message: "Only the creator can fund the escrow",
+              message: "Only the buyer can fund the escrow",
             });
           }
 
@@ -114,8 +114,8 @@ const checkEscrowAction = (actionType) => {
           break;
 
         case "deliver":
-          // Only the recipient (seller) can submit delivery proof
-          if (!isRecipient) {
+          // Seller (creator) can submit delivery proof.
+          if (!isCreator) {
             return res.status(403).json({
               success: false,
               message: "Only the seller can submit delivery proof",
@@ -132,8 +132,8 @@ const checkEscrowAction = (actionType) => {
           break;
 
         case "confirm-receipt":
-          // Only the creator (buyer) can confirm receipt
-          if (!isCreator) {
+          // Buyer (recipient) can confirm receipt.
+          if (!isRecipient) {
             return res.status(403).json({
               success: false,
               message: "Only the buyer can confirm receipt",
@@ -157,11 +157,11 @@ const checkEscrowAction = (actionType) => {
           break;
 
         case "release":
-          // Only creator can release
-          if (!isCreator) {
+          // Buyer (recipient) can release.
+          if (!isRecipient) {
             return res.status(403).json({
               success: false,
-              message: "Only the creator can release the escrow",
+              message: "Only the buyer can release the escrow",
             });
           }
 
@@ -175,11 +175,11 @@ const checkEscrowAction = (actionType) => {
           break;
 
         case "refund":
-          // Only creator can refund
-          if (!isCreator) {
+          // Buyer (recipient) is the payer and can request a refund.
+          if (!isRecipient) {
             return res.status(403).json({
               success: false,
-              message: "Only the creator can refund the escrow",
+              message: "Only the buyer can refund the escrow",
             });
           }
 
@@ -211,11 +211,11 @@ const checkEscrowAction = (actionType) => {
           break;
 
         case "cancel":
-          // Only creator can cancel
-          if (!isCreator) {
+          // Buyer (recipient) can cancel an unfunded escrow.
+          if (!isRecipient) {
             return res.status(403).json({
               success: false,
-              message: "Only the creator can cancel the escrow",
+              message: "Only the buyer can cancel the escrow",
             });
           }
 

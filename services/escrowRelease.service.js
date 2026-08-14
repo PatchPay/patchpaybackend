@@ -48,7 +48,7 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
     }
 
     // 2. Guards evaluated on the LOCKED row (never on a stale copy).
-    if (String(escrow.creatorId) !== String(buyerId)) {
+    if (String(escrow.recipientId) !== String(buyerId)) {
       throw httpError(403, "Only the buyer can confirm receipt");
     }
 
@@ -81,13 +81,13 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
     }
 
     console.log(
-      `[escrow-release] Releasing escrow ${escrow.id} (${escrow.escrowUprn}) to seller ${escrow.recipientId}`
+      `[escrow-release] Releasing escrow ${escrow.id} (${escrow.escrowUprn}) to seller ${escrow.creatorId}`
     );
 
     // 3. Resolve the seller's active wallet in the escrow currency.
     const sellerWallet = await Wallet.findOne({
       where: {
-        userId: escrow.recipientId,
+        userId: escrow.creatorId,
         currency: escrow.currency,
         isActive: true,
       },
@@ -101,7 +101,7 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
 
     // 4. Create the wallet-level release transaction (money entering seller).
     const releaseReference = generateEscrowTransferUPRN(
-      escrow.recipientId,
+      escrow.creatorId,
       escrow.id,
       "release"
     );
@@ -114,7 +114,7 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
         currency: escrow.currency,
         status: "completed",
         recipientWallet: sellerWallet.id,
-        recipientId: escrow.recipientId,
+        recipientId: escrow.creatorId,
         reference: releaseReference,
         // Deterministic key = hard backstop against a second release ever committing.
         idempotencyKey: `escrow-release-${escrow.id}`,
@@ -140,7 +140,7 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
     await EscrowTransaction.create(
       {
         escrowId: escrow.id,
-        userId: escrow.recipientId,
+        userId: escrow.creatorId,
         type: "RELEASE",
         amount: releaseAmount,
         currency: escrow.currency,
