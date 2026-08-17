@@ -1,443 +1,997 @@
-const Escrow = require('../models/Escrow');
-const Quote = require('../models/Quote');
-const Payment = require('../models/Payment');
-const User = require('../models/User');
-const sequelize = require('../config/database');
-const { Op } = require('sequelize');
-const Wallet = require('../models/Wallet');
-const Transaction = require('../models/Transaction');
-const { formatAmount } = require('../utils/accountUtils');
+const Escrow = require("../models/Escrow");
+const Quote = require("../models/Quote");
+const Payment = require("../models/Payment");
+const User = require("../models/User");
+const sequelize = require("../config/database");
+const { Op } = require("sequelize");
+const Wallet = require("../models/Wallet");
+const Transaction = require("../models/Transaction");
+const { formatAmount } = require("../utils/accountUtils");
+
 const {
   generateUPRN,
   generateEscrowTransferUPRN,
-  transactionNeedsUPRN
-} = require('../utils/paymentUtils');
-const { ApiError } = require('../utils/ApiError');
-const fs = require('fs');
-const { confirmReceiptAndRelease } = require('../services/escrowRelease.service');
+  transactionNeedsUPRN,
+} = require("../utils/paymentUtils");
+
+const { ApiError } = require("../utils/ApiError");
+
+const fs = require("fs");
+
+const {
+  confirmReceiptAndRelease,
+} = require("../services/escrowRelease.service");
+
+const {
+  createNotification,
+} = require("../services/notificationService");
+
+// ============================================================
+// SAFE USER ATTRIBUTES
+// ============================================================
 
 const SAFE_ESCROW_USER_ATTRIBUTES = [
-  'id',
-  'accountType',
-  'firstName',
-  'middleName',
-  'surname',
-  'email',
-  'phoneNumber',
-  'businessName',
-  'industry',
-  'companyAddress',
+  "id",
+  "accountType",
+  "firstName",
+  "middleName",
+  "surname",
+  "email",
+  "phoneNumber",
+  "businessName",
+  "industry",
+  "companyAddress",
 ];
 
-// Create a new escrow from a quote
+// ============================================================
+// CREATE ESCROW
+// ============================================================
+
 const createEscrow = async (req, res) => {
   const transactionDb = await sequelize.transaction();
 
   try {
     const { quoteid } = req.body;
 
-    // Find the quote
-    const quote = await Quote.findByPk(quoteid, { transaction: transactionDb });
+    // --------------------------------------------------------
+    // Find quote
+    // --------------------------------------------------------
+
+    const quote = await Quote.findByPk(quoteid, {
+      transaction: transactionDb,
+    });
+
     if (!quote) {
       await transactionDb.rollback();
+
       return res.status(404).json({
         success: false,
-        message: 'Quote not found'
+        message: "Quote not found",
       });
     }
 
-    // Verify quote status is 'Accepted'
-    if (quote.status !== 'Accepted') {
+    // --------------------------------------------------------
+    // Quote must be accepted
+    // --------------------------------------------------------
+
+    if (quote.status !== "Accepted") {
       await transactionDb.rollback();
+
       return res.status(400).json({
         success: false,
-        message: 'Can only create escrow for accepted quotes'
+        message: "Can only create escrow for accepted quotes",
       });
     }
 
-    if (String(quote.user_data?.id) !== String(req.user.id)) {
+    // --------------------------------------------------------
+    // Only seller can create escrow
+    // --------------------------------------------------------
+
+    if (
+      String(quote.user_data?.id) !==
+      String(req.user.id)
+    ) {
       await transactionDb.rollback();
+
       return res.status(403).json({
         success: false,
-        message: 'Only the seller can create escrow for this RFQ'
+        message:
+          "Only the seller can create escrow for this RFQ",
       });
     }
 
-    // Check if escrow already exists for this quote
-    const existingEscrow = await Escrow.findOne({ where: sequelize.where(sequelize.json('metadata.quoteid'), String(quote.id)), transaction: transactionDb });
+    // --------------------------------------------------------
+    // Check existing escrow
+    // --------------------------------------------------------
+
+    const existingEscrow = await Escrow.findOne({
+      where: sequelize.where(
+        sequelize.json("metadata.quoteid"),
+        String(quote.id)
+      ),
+      transaction: transactionDb,
+    });
 
     if (existingEscrow) {
       await transactionDb.rollback();
+
       return res.status(400).json({
         success: false,
-        message: 'Escrow already exists for this quote'
+        message: "Escrow already exists for this quote",
       });
     }
 
+    // --------------------------------------------------------
     // Generate escrow UPRN
-    const escrowUprn = await generateUPRN(quote.user_data.id, 'escrow_release');
+    // --------------------------------------------------------
 
-    // Set expiry date to 30 days from now
+    const escrowUprn = await generateUPRN(
+      quote.user_data.id,
+      "escrow_release"
+    );
+
+    // --------------------------------------------------------
+    // Expiry date
+    // --------------------------------------------------------
+
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
 
-    // Create the escrow
-    const escrow = await Escrow.create({
-      creatorId: quote.user_data.id,
-      recipientId: quote.destinatary_user.id,
-      amount: quote.total, // Use the quote's total amount
-      currency: quote.currency,
-      escrowUprn,
-      conditions: `Escrow for Quote #${quote.quote_number}`,
-      description: quote.product_description,
-      expiryDate, // Add expiry date
-      metadata: {
-        quoteid: quote.id,
-        quote_number: quote.quote_number,
-        product_quantity: quote.product_quantity,
-        delivery_type: quote.delivery_type,
-        trade_type: quote.trade_type,
-        delivery_code: quote.delivery_code,
-        line_total: quote.line_total,
-        delivery_charge: quote.delivery_charge,
-        transaction_charges: quote.transaction_charges,
-        subtotal: quote.subtotal,
-        exchange_rate: quote.exchange_rate
+    expiryDate.setDate(
+      expiryDate.getDate() + 30
+    );
+
+    // --------------------------------------------------------
+    // Create escrow
+    // --------------------------------------------------------
+
+    const escrow = await Escrow.create(
+      {
+        creatorId:
+          quote.user_data.id,
+
+        recipientId:
+          quote.destinatary_user.id,
+
+        amount:
+          quote.total,
+
+        currentBalance:
+          quote.total,
+
+        currency:
+          quote.currency,
+
+        status:
+          "CREATED",
+
+        escrowUprn,
+
+        conditions:
+          `Escrow for Quote #${quote.quote_number}`,
+
+        description:
+          quote.product_description,
+
+        expiryDate,
+
+        metadata: {
+          quoteid:
+            quote.id,
+
+          quote_number:
+            quote.quote_number,
+
+          product_quantity:
+            quote.product_quantity,
+
+          delivery_type:
+            quote.delivery_type,
+
+          trade_type:
+            quote.trade_type,
+
+          delivery_code:
+            quote.delivery_code,
+
+          line_total:
+            quote.line_total,
+
+          delivery_charge:
+            quote.delivery_charge,
+
+          transaction_charges:
+            quote.transaction_charges,
+
+          subtotal:
+            quote.subtotal,
+
+          exchange_rate:
+            quote.exchange_rate,
+        },
+      },
+      {
+        transaction:
+          transactionDb,
       }
-    }, { transaction: transactionDb });
+    );
+
+    // --------------------------------------------------------
+    // Commit escrow creation
+    // --------------------------------------------------------
+
     await transactionDb.commit();
 
-    res.status(201).json({
+    // ========================================================
+    // 🔔 NOTIFICATION: ESCROW CREATED
+    // ========================================================
+
+    await createNotification({
+      recipientId:
+        escrow.recipientId,
+
+      senderId:
+        escrow.creatorId,
+
+      title:
+        "Escrow Created",
+
+      message:
+        `An escrow of ${escrow.amount} ` +
+        `${escrow.currency} has been created for ` +
+        `Quote #${quote.quote_number}.`,
+
+      type:
+        "info",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_created",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        quoteId:
+          quote.id,
+
+        quoteNumber:
+          quote.quote_number,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+      },
+    });
+
+    return res.status(201).json({
       success: true,
-      data: escrow
+      message: "Escrow created successfully",
+      data: escrow,
     });
   } catch (error) {
-    await transactionDb.rollback();
-    
-    console.error('Error creating escrow:', error);
-    res.status(500).json({
+    try {
+      await transactionDb.rollback();
+    } catch (rollbackError) {
+      console.error(
+        "Escrow rollback failed:",
+        rollbackError.message
+      );
+    }
+
+    console.error(
+      "Error creating escrow:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to create escrow'
+      message: "Failed to create escrow",
     });
   }
 };
 
-// Get all escrows for a user (either as creator or recipient)
+// ============================================================
+// GET ALL ESCROWS
+// ============================================================
+
 const getEscrows = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { status, role } = req.query;
+
+    const {
+      status,
+      role,
+    } = req.query;
 
     let query = {};
 
-    // Filter by role if specified
-    if (role === 'creator') {
+    // --------------------------------------------------------
+    // Filter by role
+    // --------------------------------------------------------
+
+    if (role === "creator") {
       query.creatorId = userId;
-    } else if (role === 'recipient') {
+    } else if (role === "recipient") {
       query.recipientId = userId;
     } else {
-      query[Op.or] = [{ creatorId: userId }, { recipientId: userId }];
+      query[Op.or] = [
+        {
+          creatorId: userId,
+        },
+        {
+          recipientId: userId,
+        },
+      ];
     }
 
-    // Filter by status if specified
+    // --------------------------------------------------------
+    // Filter by status
+    // --------------------------------------------------------
+
     if (status) {
       query.status = status;
     }
 
-    const escrows = await Escrow.findAll({ where: query, include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }], order: [['createdAt', 'DESC']] });
+    // --------------------------------------------------------
+    // Fetch escrows
+    // --------------------------------------------------------
 
-    // Fetch associated quotes for each escrow
-    const escrowsWithQuotes = await Promise.all(escrows.map(async (escrow) => {
-      if (escrow.metadata && escrow.metadata.quoteid) {
-        const quote = await Quote.findByPk(escrow.metadata.quoteid, { attributes: ['quote_number', 'status', 'total', 'currency'] });
-        return {
-          ...escrow.toJSON(),
-          quote: quote ? quote.toJSON() : null
-        };
-      }
-      return escrow.toJSON();
-    }));
+    const escrows = await Escrow.findAll({
+      where: query,
 
-    res.json({
+      include: [
+        {
+          association: "creator",
+          attributes:
+            SAFE_ESCROW_USER_ATTRIBUTES,
+        },
+        {
+          association: "recipient",
+          attributes:
+            SAFE_ESCROW_USER_ATTRIBUTES,
+        },
+      ],
+
+      order: [
+        ["createdAt", "DESC"],
+      ],
+    });
+
+    // --------------------------------------------------------
+    // Attach quotes
+    // --------------------------------------------------------
+
+    const escrowsWithQuotes =
+      await Promise.all(
+        escrows.map(
+          async (escrow) => {
+            if (
+              escrow.metadata &&
+              escrow.metadata.quoteid
+            ) {
+              const quote =
+                await Quote.findByPk(
+                  escrow.metadata.quoteid,
+                  {
+                    attributes: [
+                      "quote_number",
+                      "status",
+                      "total",
+                      "currency",
+                    ],
+                  }
+                );
+
+              return {
+                ...escrow.toJSON(),
+
+                quote:
+                  quote
+                    ? quote.toJSON()
+                    : null,
+              };
+            }
+
+            return escrow.toJSON();
+          }
+        )
+      );
+
+    return res.json({
       success: true,
-      data: escrowsWithQuotes
+      data:
+        escrowsWithQuotes,
     });
   } catch (error) {
-    console.error('Error fetching escrows:', error);
-    res.status(500).json({
+    console.error(
+      "Error fetching escrows:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to fetch escrows'
+      message:
+        "Failed to fetch escrows",
     });
   }
 };
 
+// ============================================================
+// GET MY ESCROWS
+// ============================================================
 
-const getMyEscrows = async (req, res) => {
+const getMyEscrows = async (
+  req,
+  res
+) => {
   try {
+    const userId =
+      req.user.id;
 
-    const userId = req.user.id;
+    const escrows =
+      await Escrow.findAll({
+        where: {
+          [Op.or]: [
+            {
+              creatorId:
+                userId,
+            },
+            {
+              recipientId:
+                userId,
+            },
+          ],
+        },
 
-    const escrows = await Escrow.findAll({ where: { [Op.or]: [
-        { creatorId: userId },
-        { recipientId: userId }
-      ] }, include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }], order: [['createdAt', 'DESC']] });
+        include: [
+          {
+            association:
+              "creator",
 
+            attributes:
+              SAFE_ESCROW_USER_ATTRIBUTES,
+          },
 
-    res.status(200).json({
+          {
+            association:
+              "recipient",
+
+            attributes:
+              SAFE_ESCROW_USER_ATTRIBUTES,
+          },
+        ],
+
+        order: [
+          ["createdAt", "DESC"],
+        ],
+      });
+
+    return res.status(200).json({
       success: true,
-      data: escrows
+      data: escrows,
     });
+  } catch (error) {
+    console.error(
+      "Error getting user escrows:",
+      error
+    );
 
-
-  } catch(error){
-
-    console.error("Error getting user escrows:", error);
-
-    res.status(500).json({
-      success:false,
-      message:"Failed to fetch escrows"
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch escrows",
     });
-
   }
 };
 
-// Get a single escrow by ID
-const getEscrowById = async (req, res) => {
+// ============================================================
+// GET ESCROW BY ID
+// ============================================================
+
+const getEscrowById = async (
+  req,
+  res
+) => {
   try {
-    const escrow = await Escrow.findByPk(req.params.id, { include: [{ association: 'creator', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'recipient', attributes: SAFE_ESCROW_USER_ATTRIBUTES }, { association: 'fundingTransaction' }, { association: 'releaseTransaction' }, { association: 'refundTransaction' }] });
+    const escrow =
+      await Escrow.findByPk(
+        req.params.id,
+        {
+          include: [
+            {
+              association:
+                "creator",
+
+              attributes:
+                SAFE_ESCROW_USER_ATTRIBUTES,
+            },
+
+            {
+              association:
+                "recipient",
+
+              attributes:
+                SAFE_ESCROW_USER_ATTRIBUTES,
+            },
+
+            {
+              association:
+                "fundingTransaction",
+            },
+
+            {
+              association:
+                "releaseTransaction",
+            },
+
+            {
+              association:
+                "refundTransaction",
+            },
+          ],
+        }
+      );
 
     if (!escrow) {
       return res.status(404).json({
         success: false,
-        message: 'Escrow not found'
+        message:
+          "Escrow not found",
       });
     }
 
-    // Fetch associated quote if it exists
+    // --------------------------------------------------------
+    // Fetch associated quote
+    // --------------------------------------------------------
+
     let quote = null;
-    if (escrow.metadata && escrow.metadata.quoteid) {
-      quote = await Quote.findByPk(escrow.metadata.quoteid, { attributes: ['quote_number', 'status', 'total', 'currency', 'product_description', 'delivery_type', 'trade_type'] });
+
+    if (
+      escrow.metadata &&
+      escrow.metadata.quoteid
+    ) {
+      quote =
+        await Quote.findByPk(
+          escrow.metadata.quoteid,
+          {
+            attributes: [
+              "quote_number",
+              "status",
+              "total",
+              "currency",
+              "product_description",
+              "delivery_type",
+              "trade_type",
+            ],
+          }
+        );
     }
 
-    res.json({
+    return res.json({
       success: true,
+
       data: {
         ...escrow.toJSON(),
-        quote: quote ? quote.toJSON() : null
-      }
+
+        quote:
+          quote
+            ? quote.toJSON()
+            : null,
+      },
     });
   } catch (error) {
-    console.error('Error fetching escrow:', error);
-    res.status(500).json({
+    console.error(
+      "Error fetching escrow:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to fetch escrow'
+      message:
+        "Failed to fetch escrow",
     });
   }
 };
 
-// Seller marks the escrow as DELIVERED by uploading a locally stored proof.
-const removeDeliveryProofFile = async (filePath, reason) => {
-  if (!filePath) return;
+// ============================================================
+// REMOVE DELIVERY PROOF FILE
+// ============================================================
+
+const removeDeliveryProofFile = async (
+  filePath,
+  reason
+) => {
+  if (!filePath) {
+    return;
+  }
 
   try {
-    await fs.promises.unlink(filePath);
-    console.log("[escrow-deliver] CLEANUP", { reason, filePath });
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.error("[escrow-deliver] CLEANUP FAILED", {
+    await fs.promises.unlink(
+      filePath
+    );
+
+    console.log(
+      "[escrow-deliver] CLEANUP",
+      {
         reason,
         filePath,
-        message: error.message,
-      });
+      }
+    );
+  } catch (error) {
+    if (
+      error.code !== "ENOENT"
+    ) {
+      console.error(
+        "[escrow-deliver] CLEANUP FAILED",
+        {
+          reason,
+          filePath,
+          message:
+            error.message,
+        }
+      );
     }
   }
 };
 
+// ============================================================
+// MARK ESCROW AS DELIVERED
+// ============================================================
 
-const markEscrowDelivered = async (req, res) => {
-  const escrowId = req.params.id;
-  const userId = req.user.id;
-  const uploadedFilePath = req.file?.path;
+const markEscrowDelivered = async (
+  req,
+  res
+) => {
+  const escrowId =
+    req.params.id;
 
-  // ---------------------------------------------------------
-  // 1. DEBUG REQUEST / UPLOADED FILE
-  // ---------------------------------------------------------
-  console.log("[escrow-deliver] REQUEST DEBUG:", {
-    escrowId,
-    userId,
-    hasFile: !!req.file,
-    fileField: req.file?.fieldname,
-    fileName: req.file?.originalname,
-    storedFileName: req.file?.filename,
-    mimeType: req.file?.mimetype,
-    fileSize: req.file?.size,
-    filePath: req.file?.path,
-  });
+  const userId =
+    req.user.id;
 
-  // ---------------------------------------------------------
-  // 2. Validate uploaded file
-  // ---------------------------------------------------------
+  const uploadedFilePath =
+    req.file?.path;
+
+  // --------------------------------------------------------
+  // Debug request
+  // --------------------------------------------------------
+
+  console.log(
+    "[escrow-deliver] REQUEST DEBUG:",
+    {
+      escrowId,
+      userId,
+      hasFile:
+        !!req.file,
+
+      fileField:
+        req.file?.fieldname,
+
+      fileName:
+        req.file?.originalname,
+
+      storedFileName:
+        req.file?.filename,
+
+      mimeType:
+        req.file?.mimetype,
+
+      fileSize:
+        req.file?.size,
+
+      filePath:
+        req.file?.path,
+    }
+  );
+
+  // --------------------------------------------------------
+  // Validate uploaded file
+  // --------------------------------------------------------
+
   if (!req.file) {
-    console.log("[escrow-deliver] ❌ NO FILE RECEIVED");
+    console.log(
+      "[escrow-deliver] ❌ NO FILE RECEIVED"
+    );
 
     return res.status(400).json({
       success: false,
-      message: "A deliveryProof image file is required",
+      message:
+        "A deliveryProof image file is required",
     });
   }
 
   if (!req.file.path) {
-    console.log("[escrow-deliver] FILE PATH MISSING");
+    console.log(
+      "[escrow-deliver] FILE PATH MISSING"
+    );
 
     return res.status(400).json({
       success: false,
-      message: "Delivery-proof file was received but could not be stored",
+      message:
+        "Delivery-proof file was received but could not be stored",
     });
   }
 
-  let transactionDb = null;
+  let transactionDb =
+    null;
 
   try {
-    // Start the transaction only after Multer has safely stored the file.
-    transactionDb = await sequelize.transaction();
+    // --------------------------------------------------------
+    // Start transaction
+    // --------------------------------------------------------
 
-    // ---------------------------------------------------------
-    // 5. Fetch escrow with row lock
-    // ---------------------------------------------------------
-    const escrow = await Escrow.findByPk(escrowId, {
-      transaction: transactionDb,
-      lock: transactionDb.LOCK.UPDATE,
-    });
+    transactionDb =
+      await sequelize.transaction();
+
+    // --------------------------------------------------------
+    // Fetch escrow with row lock
+    // --------------------------------------------------------
+
+    const escrow =
+      await Escrow.findByPk(
+        escrowId,
+        {
+          transaction:
+            transactionDb,
+
+          lock:
+            transactionDb.LOCK.UPDATE,
+        }
+      );
 
     if (!escrow) {
       await transactionDb.rollback();
+
       transactionDb = null;
 
-      await removeDeliveryProofFile(uploadedFilePath, "escrow not found");
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "escrow not found"
+      );
 
       return res.status(404).json({
         success: false,
-        message: "Escrow not found",
+        message:
+          "Escrow not found",
       });
     }
 
-    // ---------------------------------------------------------
-    // 6. Authorization check
-    // Seller = creatorId
-    // ---------------------------------------------------------
-    const creatorMatch = String(userId) === String(escrow.creatorId);
-    const recipientMatch = String(userId) === String(escrow.recipientId);
+    // --------------------------------------------------------
+    // Authorization
+    // Seller = creator
+    // --------------------------------------------------------
 
-    console.log("[escrow-deliver] ROLE CHECK:", {
-      escrowId: escrow.id,
-      userId,
-      creatorId: escrow.creatorId,
-      recipientId: escrow.recipientId,
-      creatorMatch,
-      recipientMatch,
-      status: escrow.status,
-    });
+    const creatorMatch =
+      String(userId) ===
+      String(escrow.creatorId);
 
-    if (!creatorMatch) {
-      await transactionDb.rollback();
-      transactionDb = null;
+    const recipientMatch =
+      String(userId) ===
+      String(escrow.recipientId);
 
-      await removeDeliveryProofFile(uploadedFilePath, "seller authorization failed");
-
-      return res.status(403).json({
-        success: false,
-        message: "Only the seller can submit delivery proof",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 7. Log complete escrow state
-    // ---------------------------------------------------------
-    console.log("[escrow-deliver] ESCROW STATE:", {
-      id: escrow.id,
-      status: escrow.status,
-      creatorId: escrow.creatorId,
-      recipientId: escrow.recipientId,
-      userId,
-      deliveryProofUrl: escrow.deliveryProofUrl,
-      deliveryProofPublicId: escrow.deliveryProofPublicId,
-      sellerDeliveredAt: escrow.sellerDeliveredAt,
-    });
-
-    // ---------------------------------------------------------
-    // 8. Check escrow state
-    // ---------------------------------------------------------
-    if (escrow.status !== "FUNDED") {
-      await transactionDb.rollback();
-      transactionDb = null;
-
-      await removeDeliveryProofFile(uploadedFilePath, "invalid escrow state");
-
-      return res.status(400).json({
-        success: false,
-        message: `Delivery proof can only be submitted when escrow is FUNDED. Current status: ${escrow.status}`,
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 9. Prevent duplicate delivery proof
-    // ---------------------------------------------------------
-    if (escrow.deliveryProofUrl || escrow.deliveryProofPublicId) {
-      await transactionDb.rollback();
-      transactionDb = null;
-
-      await removeDeliveryProofFile(uploadedFilePath, "duplicate delivery proof");
-
-      return res.status(409).json({
-        success: false,
-        message: "Delivery proof has already been submitted",
-      });
-    }
-
-    // ---------------------------------------------------------
-    // 10. Mark escrow as delivered
-    // ---------------------------------------------------------
-    const deliveredAt = new Date();
-
-    await escrow.update(
+    console.log(
+      "[escrow-deliver] ROLE CHECK:",
       {
-        deliveryProofUrl: `/uploads/delivery-proofs/${req.file.filename}`,
-        deliveryProofPublicId: null,
-        sellerDeliveredAt: deliveredAt,
-        status: "DELIVERED",
-      },
-      {
-        transaction: transactionDb,
+        escrowId:
+          escrow.id,
+
+        userId,
+
+        creatorId:
+          escrow.creatorId,
+
+        recipientId:
+          escrow.recipientId,
+
+        creatorMatch,
+
+        recipientMatch,
+
+        status:
+          escrow.status,
       }
     );
 
-    // ---------------------------------------------------------
-    // 11. Commit transaction
-    // ---------------------------------------------------------
+    if (!creatorMatch) {
+      await transactionDb.rollback();
+
+      transactionDb = null;
+
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "seller authorization failed"
+      );
+
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only the seller can submit delivery proof",
+      });
+    }
+
+    // --------------------------------------------------------
+    // Check escrow state
+    // --------------------------------------------------------
+
+    if (
+      escrow.status !==
+      "FUNDED"
+    ) {
+      await transactionDb.rollback();
+
+      transactionDb = null;
+
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "invalid escrow state"
+      );
+
+      return res.status(400).json({
+        success: false,
+        message:
+          `Delivery proof can only be submitted when escrow is FUNDED. Current status: ${escrow.status}`,
+      });
+    }
+
+    // --------------------------------------------------------
+    // Prevent duplicate proof
+    // --------------------------------------------------------
+
+    if (
+      escrow.deliveryProofUrl ||
+      escrow.deliveryProofPublicId
+    ) {
+      await transactionDb.rollback();
+
+      transactionDb = null;
+
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "duplicate delivery proof"
+      );
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Delivery proof has already been submitted",
+      });
+    }
+
+    // --------------------------------------------------------
+    // Mark delivered
+    // --------------------------------------------------------
+
+    const deliveredAt =
+      new Date();
+
+    await escrow.update(
+      {
+        deliveryProofUrl:
+          `/uploads/delivery-proofs/${req.file.filename}`,
+
+        deliveryProofPublicId:
+          null,
+
+        sellerDeliveredAt:
+          deliveredAt,
+
+        status:
+          "DELIVERED",
+      },
+      {
+        transaction:
+          transactionDb,
+      }
+    );
+
+    // --------------------------------------------------------
+    // Commit
+    // --------------------------------------------------------
+
     await transactionDb.commit();
+
     transactionDb = null;
 
-    console.log("[escrow-deliver] DELIVERY SUCCESS", {
-      escrowId: escrow.id,
-      userId,
-      status: escrow.status,
-      deliveryProofUrl: escrow.deliveryProofUrl,
+    console.log(
+      "[escrow-deliver] DELIVERY SUCCESS",
+      {
+        escrowId:
+          escrow.id,
+
+        userId,
+
+        status:
+          escrow.status,
+
+        deliveryProofUrl:
+          escrow.deliveryProofUrl,
+      }
+    );
+
+    // ========================================================
+    // 🔔 NOTIFICATION: ESCROW DELIVERED
+    // ========================================================
+
+    await createNotification({
+      recipientId:
+        escrow.recipientId,
+
+      senderId:
+        escrow.creatorId,
+
+      title:
+        "Order Delivered",
+
+      message:
+        `The seller has marked escrow #${escrow.escrowUprn} as delivered. Please review the delivery and confirm receipt.`,
+
+      type:
+        "info",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_delivered",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        deliveryProofUrl:
+          escrow.deliveryProofUrl,
+
+        sellerDeliveredAt:
+          escrow.sellerDeliveredAt,
+      },
     });
 
     return res.status(200).json({
       success: true,
-      message: "Delivery proof submitted; escrow marked as delivered",
+
+      message:
+        "Delivery proof submitted; escrow marked as delivered",
+
       data: {
-        id: escrow.id,
-        status: escrow.status,
-        deliveryProofUrl: escrow.deliveryProofUrl,
-        sellerDeliveredAt: escrow.sellerDeliveredAt,
+        id:
+          escrow.id,
+
+        status:
+          escrow.status,
+
+        deliveryProofUrl:
+          escrow.deliveryProofUrl,
+
+        sellerDeliveredAt:
+          escrow.sellerDeliveredAt,
       },
     });
   } catch (error) {
-    // ---------------------------------------------------------
-    // 12. Rollback database transaction if still active
-    // ---------------------------------------------------------
+    // --------------------------------------------------------
+    // Rollback
+    // --------------------------------------------------------
+
     if (transactionDb) {
       try {
         await transactionDb.rollback();
@@ -449,7 +1003,10 @@ const markEscrowDelivered = async (req, res) => {
       }
     }
 
-    await removeDeliveryProofFile(uploadedFilePath, "database transaction failed");
+    await removeDeliveryProofFile(
+      uploadedFilePath,
+      "database transaction failed"
+    );
 
     console.error(
       "[escrow-deliver] Error marking escrow delivered:",
@@ -458,184 +1015,578 @@ const markEscrowDelivered = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to submit delivery proof",
+      message:
+        "Failed to submit delivery proof",
     });
   }
 };
 
+// ============================================================
+// CONFIRM ESCROW RECEIPT + RELEASE
+// ============================================================
 
-
-
-// Buyer confirms receipt — this triggers the automatic, atomic fund release
-const confirmEscrowReceipt = async (req, res) => {
+const confirmEscrowReceipt = async (
+  req,
+  res
+) => {
   try {
-    const escrow = await confirmReceiptAndRelease(req.params.id, req.user.id);
+    const escrow =
+      await confirmReceiptAndRelease(
+        req.params.id,
+        req.user.id
+      );
+
+    // ========================================================
+    // 🔔 NOTIFICATION: ESCROW RELEASED
+    // ========================================================
+
+    await createNotification({
+      recipientId:
+        escrow.creatorId,
+
+      senderId:
+        escrow.recipientId,
+
+      title:
+        "Escrow Funds Released",
+
+      message:
+        `The buyer has confirmed receipt. ${escrow.amount} ${escrow.currency} has been released to you.`,
+
+      type:
+        "success",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_released",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        releaseTransactionId:
+          escrow.releaseTransactionId,
+      },
+    });
 
     return res.status(200).json({
       success: true,
-      message: 'Receipt confirmed; escrow funds released to the seller',
-      data: escrow,
+
+      message:
+        "Receipt confirmed; escrow funds released to the seller",
+
+      data:
+        escrow,
     });
   } catch (error) {
-    const statusCode = error.statusCode || 500;
+    const statusCode =
+      error.statusCode || 500;
 
     if (statusCode >= 500) {
-      console.error('Error confirming escrow receipt:', error.message);
-      return res.status(statusCode).json({
+      console.error(
+        "Error confirming escrow receipt:",
+        error.message
+      );
+
+      return res.status(
+        statusCode
+      ).json({
         success: false,
-        message: 'Failed to confirm receipt and release escrow',
+        message:
+          "Failed to confirm receipt and release escrow",
       });
     }
 
-    return res.status(statusCode).json({
+    return res.status(
+      statusCode
+    ).json({
       success: false,
-      message: error.message,
+      message:
+        error.message,
     });
   }
 };
 
-// Release escrow funds.
-// Hardened: delegates to the same atomic release service as confirm-receipt,
-// which requires the escrow to be DELIVERED with valid proof and the caller to
-// be the buyer. This prevents /release from paying out a merely-FUNDED escrow
-// and bypassing the delivery/confirmation flow. Any client-supplied
-// transactionId in the body is ignored — the release transaction is created
-// server-side.
-const releaseEscrow = async (req, res) => {
+// ============================================================
+// RELEASE ESCROW
+// ============================================================
+
+const releaseEscrow = async (
+  req,
+  res
+) => {
   try {
-    const escrow = await confirmReceiptAndRelease(req.params.id, req.user.id);
+    const escrow =
+      await confirmReceiptAndRelease(
+        req.params.id,
+        req.user.id
+      );
+
+    // ========================================================
+    // 🔔 NOTIFICATION: ESCROW RELEASED
+    // ========================================================
+
+    await createNotification({
+      recipientId:
+        escrow.creatorId,
+
+      senderId:
+        escrow.recipientId,
+
+      title:
+        "Escrow Funds Released",
+
+      message:
+        `Escrow #${escrow.escrowUprn} has been released. ${escrow.amount} ${escrow.currency} has been released to you.`,
+
+      type:
+        "success",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_released",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        releaseTransactionId:
+          escrow.releaseTransactionId,
+      },
+    });
 
     return res.json({
       success: true,
-      message: 'Escrow funds released to the seller',
-      data: escrow,
+
+      message:
+        "Escrow funds released to the seller",
+
+      data:
+        escrow,
     });
   } catch (error) {
-    const statusCode = error.statusCode || 500;
+    const statusCode =
+      error.statusCode || 500;
 
     if (statusCode >= 500) {
-      console.error('Error releasing escrow:', error.message);
-      return res.status(statusCode).json({
+      console.error(
+        "Error releasing escrow:",
+        error.message
+      );
+
+      return res.status(
+        statusCode
+      ).json({
         success: false,
-        message: 'Failed to release escrow',
+        message:
+          "Failed to release escrow",
       });
     }
 
-    return res.status(statusCode).json({
+    return res.status(
+      statusCode
+    ).json({
       success: false,
-      message: error.message,
+      message:
+        error.message,
     });
   }
 };
 
-// Refund escrow
-const refundEscrow = async (req, res) => {
+// ============================================================
+// REFUND ESCROW
+// ============================================================
+
+const refundEscrow = async (
+  req,
+  res
+) => {
   try {
-    const { transactionId } = req.body;
-    const escrow = await Escrow.findByPk(req.params.id);
+    const {
+      transactionId,
+    } = req.body;
+
+    const escrow =
+      await Escrow.findByPk(
+        req.params.id
+      );
 
     if (!escrow) {
       return res.status(404).json({
         success: false,
-        message: 'Escrow not found'
+        message:
+          "Escrow not found",
       });
     }
 
-    if (escrow.status !== 'FUNDED') {
+    if (
+      escrow.status !==
+      "FUNDED"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Escrow cannot be refunded in its current state'
+        message:
+          "Escrow cannot be refunded in its current state",
       });
     }
 
-    escrow.status = 'REFUNDED';
-    escrow.refundTransactionId = transactionId;
+    escrow.status =
+      "REFUNDED";
+
+    escrow.refundTransactionId =
+      transactionId;
+
     await escrow.save();
 
-    res.json({
+    // ========================================================
+    // 🔔 NOTIFICATION: REFUND
+    // ========================================================
+
+    await createNotification({
+      recipientId:
+        escrow.recipientId,
+
+      senderId:
+        escrow.creatorId,
+
+      title:
+        "Escrow Refunded",
+
+      message:
+        `Escrow #${escrow.escrowUprn} has been refunded. The escrow amount was ${escrow.amount} ${escrow.currency}.`,
+
+      type:
+        "info",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_refunded",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        refundTransactionId:
+          escrow.refundTransactionId,
+      },
+    });
+
+    return res.json({
       success: true,
-      data: escrow
+
+      message:
+        "Escrow refunded successfully",
+
+      data:
+        escrow,
     });
   } catch (error) {
-    console.error('Error refunding escrow:', error);
-    res.status(500).json({
+    console.error(
+      "Error refunding escrow:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to refund escrow'
+      message:
+        "Failed to refund escrow",
     });
   }
 };
 
-// Dispute an escrow
-const disputeEscrow = async (req, res) => {
+// ============================================================
+// DISPUTE ESCROW
+// ============================================================
+
+const disputeEscrow = async (
+  req,
+  res
+) => {
   try {
-    const { reason } = req.body;
-    const escrow = await Escrow.findByPk(req.params.id);
+    const {
+      reason,
+    } = req.body;
+
+    const escrow =
+      await Escrow.findByPk(
+        req.params.id
+      );
 
     if (!escrow) {
       return res.status(404).json({
         success: false,
-        message: 'Escrow not found'
+        message:
+          "Escrow not found",
       });
     }
 
-    if (escrow.status !== 'FUNDED' && escrow.status !== 'DELIVERED') {
+    if (
+      escrow.status !==
+        "FUNDED" &&
+      escrow.status !==
+        "DELIVERED"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Escrow cannot be disputed in its current state'
+        message:
+          "Escrow cannot be disputed in its current state",
       });
     }
 
-    escrow.status = 'DISPUTED';
-    escrow.metadata = { ...escrow.metadata, disputeReason: reason };
+    escrow.status =
+      "DISPUTED";
+
+    escrow.metadata = {
+      ...escrow.metadata,
+
+      disputeReason:
+        reason,
+    };
+
     await escrow.save();
 
-    res.json({
+    // ========================================================
+    // 🔔 NOTIFICATION: DISPUTE
+    // ========================================================
+
+    // Notify the other party.
+    const notificationRecipientId =
+      String(escrow.creatorId) ===
+      String(req.user.id)
+        ? escrow.recipientId
+        : escrow.creatorId;
+
+    await createNotification({
+      recipientId:
+        notificationRecipientId,
+
+      senderId:
+        req.user.id,
+
+      title:
+        "Escrow Disputed",
+
+      message:
+        `Escrow #${escrow.escrowUprn} has been disputed.` +
+        (reason
+          ? ` Reason: ${reason}`
+          : ""),
+
+      type:
+        "error",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_disputed",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        reason:
+          reason || null,
+
+        disputedBy:
+          req.user.id,
+      },
+    });
+
+    return res.json({
       success: true,
-      data: escrow
+
+      message:
+        "Escrow disputed successfully",
+
+      data:
+        escrow,
     });
   } catch (error) {
-    console.error('Error disputing escrow:', error);
-    res.status(500).json({
+    console.error(
+      "Error disputing escrow:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to dispute escrow'
+      message:
+        "Failed to dispute escrow",
     });
   }
 };
 
-// Cancel an escrow
-const cancelEscrow = async (req, res) => {
+// ============================================================
+// CANCEL ESCROW
+// ============================================================
+
+const cancelEscrow = async (
+  req,
+  res
+) => {
   try {
-    const escrow = await Escrow.findByPk(req.params.id);
+    const escrow =
+      await Escrow.findByPk(
+        req.params.id
+      );
 
     if (!escrow) {
       return res.status(404).json({
         success: false,
-        message: 'Escrow not found'
+        message:
+          "Escrow not found",
       });
     }
 
-    if (escrow.status !== 'CREATED') {
+    if (
+      escrow.status !==
+      "CREATED"
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Escrow cannot be cancelled in its current state'
+        message:
+          "Escrow cannot be cancelled in its current state",
       });
     }
 
-    escrow.status = 'CANCELLED';
+    escrow.status =
+      "CANCELLED";
+
     await escrow.save();
 
-    res.json({
+    // ========================================================
+    // 🔔 NOTIFICATION: CANCELLED
+    // ========================================================
+
+    const notificationRecipientId =
+      String(escrow.creatorId) ===
+      String(req.user.id)
+        ? escrow.recipientId
+        : escrow.creatorId;
+
+    await createNotification({
+      recipientId:
+        notificationRecipientId,
+
+      senderId:
+        req.user.id,
+
+      title:
+        "Escrow Cancelled",
+
+      message:
+        `Escrow #${escrow.escrowUprn} has been cancelled.`,
+
+      type:
+        "info",
+
+      category:
+        "escrow",
+
+      metadata: {
+        event:
+          "escrow_cancelled",
+
+        escrowId:
+          escrow.id,
+
+        escrowUprn:
+          escrow.escrowUprn,
+
+        amount:
+          escrow.amount,
+
+        currency:
+          escrow.currency,
+
+        status:
+          escrow.status,
+
+        cancelledBy:
+          req.user.id,
+      },
+    });
+
+    return res.json({
       success: true,
-      data: escrow
+
+      message:
+        "Escrow cancelled successfully",
+
+      data:
+        escrow,
     });
   } catch (error) {
-    console.error('Error cancelling escrow:', error);
-    res.status(500).json({
+    console.error(
+      "Error cancelling escrow:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: 'Failed to cancel escrow'
+      message:
+        "Failed to cancel escrow",
     });
   }
 };
+
+// ============================================================
+// EXPORTS
+// ============================================================
 
 module.exports = {
   createEscrow,
@@ -647,5 +1598,5 @@ module.exports = {
   releaseEscrow,
   refundEscrow,
   disputeEscrow,
-  cancelEscrow
-}; 
+  cancelEscrow,
+};
