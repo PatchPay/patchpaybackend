@@ -7,8 +7,7 @@ require("dotenv").config();
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 
-const sequelize = require("./config/database");
-require("./models");
+const prisma = require("./lib/prisma");
 
 // Routes
 const userRoutes = require("./routes/userRoutes");
@@ -152,13 +151,11 @@ app.use((req, res) => {
 
 async function startServer() {
   try {
-    await sequelize.authenticate();
+    await prisma.$connect();
 
     console.log("✅ PostgreSQL Connected");
 
-  await sequelize.sync();
-
-console.log("✅ Database synchronized");
+    console.log("✅ Prisma connected; schema is managed by Prisma migrations");
 
     await bankService
       .syncBanksFromSquad()

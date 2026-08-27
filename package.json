@@ -5,7 +5,13 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node setup-controllers.js && node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "prisma:validate": "node scripts/prisma.js validate",
+    "prisma:generate": "node scripts/prisma.js generate",
+    "prisma:migrate": "node scripts/prisma.js migrate dev",
+    "prisma:reset": "node scripts/prisma.js migrate reset --force",
+    "prisma:seed": "node prisma/seed.js",
+    "prisma": { "seed": "node prisma/seed.js" }
   },
   "keywords": [],
   "author": "",
@@ -15,6 +21,7 @@
     "@feathersjs/feathers": "^5.0.33",
     "@feathersjs/koa": "^5.0.33",
     "@feathersjs/socketio": "^5.0.33",
+    "@prisma/client": "^6.19.3",
     "@sendgrid/mail": "^8.1.4",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",
@@ -39,6 +46,7 @@
     "uuid": "^14.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.9",
+    "prisma": "^6.19.3"
   }
 }

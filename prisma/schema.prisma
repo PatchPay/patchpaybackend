@@ -1,0 +1,855 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id Int @id @default(autoincrement())
+  accountType UserAccountType @map("account_type")
+  statusClient ClientStatus @default(Inactive) @map("status_client")
+  email String @unique
+  password String
+  transactionPinHash String? @map("transaction_pin_hash")
+  resetPasswordOtp String? @map("reset_password_otp")
+  hasTransactionPin Boolean @default(false) @map("has_transaction_pin")
+  country String
+  countryCode String @map("country_code")
+  phoneNumber String? @map("phone_number")
+  emailVerified Boolean @default(false) @map("email_verified")
+  otp String?
+  otpExpires DateTime? @map("otp_expires")
+  resetPasswordToken String? @map("reset_password_token")
+  resetPasswordExpires DateTime? @map("reset_password_expires")
+  notification Boolean @default(false)
+  firstName String? @map("first_name")
+  middleName String? @map("middle_name")
+  surname String?
+  businessName String? @map("business_name")
+  industry String?
+  companyAddress String? @db.Text @map("company_address")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  wallets Wallet[]
+  addresses Addresses[]
+  balances Balance[]
+  couponAssignments CouponAssignment[]
+  creditAccounts CreditMyAccountBks[]
+  escrowCreated Escrow[] @relation("EscrowCreator")
+  escrowReceived Escrow[] @relation("EscrowRecipient")
+  escrowTransactions EscrowTransaction[]
+  invoicesRequested Invoice[] @relation("InvoiceRequester")
+  invoicesReceived Invoice[] @relation("InvoiceRecipient")
+  notificationsReceived Notification[] @relation("NotificationRecipient")
+  notificationsSent Notification[] @relation("NotificationSender")
+  payments Payment[]
+  paymentVerifications PaymentVerification[]
+  securityQuestionSets SecurityQuestionSet[]
+  transfers Transfer[]
+  depositPayments DepositPayment[]
+  withdrawalPayments WithdrawalPayment[]
+  @@map("users")
+}
+
+model Wallet {
+  id Int @id @default(autoincrement())
+  userId Int @map("user_id")
+  accountType WalletAccountType @default(personal) @map("account_type")
+  accountNumber String @unique @db.VarChar(50) @map("account_number")
+  balance Decimal @default(0) @db.Decimal(15,2)
+  currency WalletCurrency
+  isActive Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId], references:[id])
+  @@map("wallets")
+}
+model Transaction {
+  id Int @id @default(autoincrement())
+  type TransactionType
+  amount Decimal @db.Decimal(15,2)
+  fee Decimal @default(0) @db.Decimal(15,2)
+  total Decimal @db.Decimal(15,2)
+  currency String @default("NGN")
+  status TransactionStatus @default(pending)
+  senderWallet Int? @map("sender_wallet")
+  senderId Int? @map("sender_id")
+  recipientWallet Int? @map("recipient_wallet")
+  recipientId Int? @map("recipient_id")
+  reference String? @unique
+  idempotencyKey String @unique @default(uuid()) @map("idempotency_key")
+  isUserAccountTransfer Boolean @default(true) @map("is_user_account_transfer")
+  staticUserUprn String? @map("static_user_uprn")
+  description String? @db.Text
+  externalReference String? @map("external_reference")
+  verificationStatus VerificationStatus @default(not_required) @map("verification_status")
+  verificationId Int? @map("verification_id")
+  paymentMethod TransactionPaymentMethod @default(wallet) @map("payment_method")
+  paymentGateway PaymentGateway @default(Internal) @map("payment_gateway")
+  nameOnPaymentMethod String? @map("name_on_payment_method")
+  failureReason String? @db.Text @map("failure_reason")
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  depositPayments DepositPayment[]
+  withdrawalPayments WithdrawalPayment[]
+  @@map("transactions")
+}
+model DepositPayment {
+  id Int @id @default(autoincrement())
+  userId Int @map("user_id")
+  amount Decimal @db.Decimal(15,2)
+  currency String @default("NGN") @db.VarChar(10)
+  transactionRef String @unique @map("transaction_ref")
+  squadRef String? @unique @map("squad_ref")
+  status DepositStatus @default(pending)
+  gatewayResponse Json? @map("gateway_response")
+  gatewayResponseCode String? @map("gateway_response_code")
+  transactionId Int? @map("transaction_id")
+  ipAddress String? @map("ip_address")
+  userAgent String? @db.Text @map("user_agent")
+  errorMessage String? @db.Text @map("error_message")
+  errorCode String? @map("error_code")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  transaction Transaction? @relation(fields:[transactionId],references:[id])
+  @@map("deposit_payments")
+}
+model WithdrawalPayment {
+  id Int @id @default(autoincrement())
+  userId Int @map("user_id")
+  amount Decimal @db.Decimal(15,2)
+  currency String @default("NGN")
+  refunded Boolean @default(false)
+  transactionRef String @unique @map("transaction_ref")
+  squadRef String? @unique @map("squad_ref")
+  idempotencyKey String? @unique @map("idempotency_key")
+  flowType WithdrawalFlow @default(withdrawal) @map("flow_type")
+  bankCode String @map("bank_code")
+  accountNumber String @map("account_number")
+  accountName String @map("account_name")
+  status WithdrawalStatus @default(pending)
+  gatewayResponse Json? @map("gateway_response")
+  gatewayResponseCode String? @map("gateway_response_code")
+  providerResponses Json @default("[]") @map("provider_responses")
+  auditTrail Json @default("[]") @map("audit_trail")
+  ipAddress String? @map("ip_address")
+  userAgent String? @db.Text @map("user_agent")
+  errorMessage String? @db.Text @map("error_message")
+  errorCode String? @map("error_code")
+  metadata Json @default("{}")
+  transactionId Int? @map("transaction_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  transaction Transaction? @relation(fields:[transactionId],references:[id])
+  @@map("withdrawal_payments")
+}
+model Escrow {
+  id Int @id @default(autoincrement())
+  creatorId Int @map("creator_id")
+  recipientId Int @map("recipient_id")
+  amount Float
+  currentBalance Float @default(0) @map("current_balance")
+  currency String @default("NGN")
+  status EscrowStatus @default(CREATED)
+  escrowUprn String @unique @map("escrow_uprn")
+  fundingTransactionId Int? @map("funding_transaction_id")
+  releaseTransactionId Int? @map("release_transaction_id")
+  refundTransactionId Int? @map("refund_transaction_id")
+  deliveryProofUrl String? @db.Text @map("delivery_proof_url")
+  deliveryProofPublicId String? @map("delivery_proof_public_id")
+  sellerDeliveredAt DateTime? @map("seller_delivered_at")
+  buyerReceived Boolean @default(false) @map("buyer_received")
+  buyerReceivedAt DateTime? @map("buyer_received_at")
+  conditions String
+  expiryDate DateTime? @map("expiry_date")
+  description String
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  creator User @relation("EscrowCreator",fields:[creatorId],references:[id])
+  recipient User @relation("EscrowRecipient",fields:[recipientId],references:[id])
+  escrowTransactions EscrowTransaction[]
+  invoices Invoice[]
+  @@index([creatorId,createdAt])
+  @@index([recipientId,status])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("escrows")
+}
+model EscrowTransaction {
+  id Int @id @default(autoincrement())
+  transactionReference String @unique @map("transaction_reference")
+  escrowId Int @map("escrow_id")
+  userId Int @map("user_id")
+  type EscrowTransactionType
+  amount Float
+  currency String
+  balanceAfterTransaction Float @map("balance_after_transaction")
+  outstandingBalanceAfterTransaction Float @map("outstanding_balance_after_transaction")
+  originalAmount Float @map("original_amount")
+  status EscrowTransactionStatus @default(PENDING)
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  escrow Escrow @relation(fields:[escrowId],references:[id])
+  user User @relation(fields:[userId],references:[id])
+  @@map("escrow_transactions")
+}
+model Invoice {
+  id Int @id @default(autoincrement())
+  rfqId Int @unique @map("rfq_id")
+  requesterId Int @map("requester_id")
+  recipientId Int @map("recipient_id")
+  amount Float
+  currency String @default("NGN")
+  description String
+  status InvoiceStatus @default(pending)
+  paymentStatus InvoicePaymentStatus @default(unpaid) @map("payment_status")
+  paymentReference String? @unique @map("payment_reference")
+  squadRef String? @unique @map("squad_ref")
+  checkoutUrl String? @map("checkout_url")
+  paidAt DateTime? @map("paid_at")
+  verifiedAt DateTime? @map("verified_at")
+  gatewayResponse Json? @map("gateway_response")
+  escrowId Int? @map("escrow_id")
+  fundingTransactionId Int? @map("funding_transaction_id")
+  escrowFundingTransactionId Int? @map("escrow_funding_transaction_id")
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  requester User @relation("InvoiceRequester",fields:[requesterId],references:[id])
+  recipient User @relation("InvoiceRecipient",fields:[recipientId],references:[id])
+  escrow Escrow? @relation(fields:[escrowId],references:[id])
+  @@index([requesterId,createdAt])
+  @@index([recipientId,createdAt])
+  @@index([status])
+  @@index([paymentStatus])
+  @@map("invoices")
+}
+model Quote {
+  id Int @id @default(autoincrement())
+  quote_number String @unique
+  type QuoteType
+  product_description String
+  product_quantity Int
+  amount Float
+  currency QuoteCurrency
+  total Float
+  uprn String
+  status QuoteStatusValue @default(Pending)
+  user_data Json
+  destinatary_user Json
+  delivery_code Int
+  delivery_type DeliveryType
+  trade_type TradeType
+  delivery_address Json
+  arrival_date DateTime
+  arrival_time String
+  line_total Float
+  delivery_charge Float
+  transaction_charges Float
+  subtotal Float
+  proof_delivery Int
+  coupon Json @default("[]")
+  exchange_rate Float @default(1)
+  responseNotificationDue DateTime? @map("response_notification_due")
+  notificationSent Boolean @default(false) @map("notification_sent")
+  deletionNotificationSent Boolean @default(false) @map("deletion_notification_sent")
+  invoice Int?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  quoteStatuses QuoteStatus[]
+  quoteHistories QuoteHistory[]
+  refundRequests RefundRequest[]
+  quoteCoupons QuoteCoupon[]
+  @@index([status,responseNotificationDue,notificationSent])
+  @@index([status,updatedAt,deletionNotificationSent])
+  @@map("quotes")
+}
+model QuoteStatus {
+  id Int @id @default(autoincrement())
+  quote Int
+  status QuoteProgress
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  quoteRelation Quote @relation(fields:[quote],references:[id])
+  @@map("quote_statuses")
+}
+model QuoteHistory {
+  id Int @id @default(autoincrement())
+  quote Int
+  user_data Json
+  status QuoteHistoryStatus
+  action String
+  notificationDue DateTime? @map("notification_due")
+  notificationSent Boolean @default(false) @map("notification_sent")
+  deletionDue DateTime? @map("deletion_due")
+  deletionNotificationSent Boolean @default(false) @map("deletion_notification_sent")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  quoteRelation Quote @relation(fields:[quote],references:[id])
+  @@index([notificationDue])
+  @@index([deletionDue])
+  @@index([quote,createdAt])
+  @@map("quote_histories")
+}
+model Bank {
+  id Int @id @default(autoincrement())
+  bankCode String @unique @map("bank_code")
+  name String
+  country String? @default("NG")
+  active Boolean? @default(true)
+  raw Json? @default("{}")
+  lastSyncedAt DateTime? @default(now()) @map("last_synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([active,bankCode])
+  @@map("banks")
+}
+model Addresses {
+  id Int @id @default(autoincrement())
+  addresses Json
+  userId Int @map("user")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  @@map("addresses")
+}
+model Amount {
+  id Int @id @default(autoincrement())
+  value Float
+  currency String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  bkCommissions BkCommission[]
+  bkRates BkRate[]
+  creditAccounts CreditMyAccountBks[]
+  balanceAmounts Balance[] @relation("BalanceAmount")
+  availableBalanceAmounts Balance[] @relation("AvailableBalanceAmount")
+  refunds Refund[]
+  @@map("amounts")
+}
+model Balance {
+  id Int @id @default(autoincrement())
+  balance Int
+  available_balance Int
+  currency String
+  userId Int @map("user")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  balanceAmount Amount @relation("BalanceAmount",fields:[balance],references:[id])
+  availableBalanceAmount Amount @relation("AvailableBalanceAmount",fields:[available_balance],references:[id])
+  user User @relation(fields:[userId],references:[id])
+  @@map("balances")
+}
+model BkCommission {
+  id Int @id @default(autoincrement())
+  uprn String
+  amount Int
+  currency String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  amountRelation Amount @relation(fields:[amount],references:[id])
+  @@map("bk_commissions")
+}
+model BkRate {
+  id Int @id @default(autoincrement())
+  code_transfer String @unique
+  amount Int
+  currency String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  amountRelation Amount @relation(fields:[amount],references:[id])
+  @@map("bk_rates")
+}
+model CardDetails {
+  id Int @id @default(autoincrement())
+  card_number String @unique
+  card_holder_name String
+  expiry_date DateTime
+  cvv String
+  billing_address String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("card_details")
+}
+model Commission {
+  id Int @id @default(autoincrement())
+  commission_squad Float
+  commission_stripe Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  nationalFinancialData FinancialData[] @relation("NationalCommission")
+  internationalFinancialData FinancialData[] @relation("InternationalCommission")
+  @@map("commissions")
+}
+model Total {
+  id Int @id @default(autoincrement())
+  value Float
+  currency String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  nationalFinancialData FinancialData[] @relation("NationalTotal")
+  internationalFinancialData FinancialData[] @relation("InternationalTotal")
+  @@map("totals")
+}
+model FinancialData {
+  id Int @id @default(autoincrement())
+  commissions_national Int
+  total_national Int
+  commissions_international Int
+  total_international Int
+  rate_international_squad Float
+  rate_international_stripe Float
+  rate_national_squad Float
+  rate_national_stripe Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  nationalCommission Commission @relation("NationalCommission",fields:[commissions_national],references:[id])
+  internationalCommission Commission @relation("InternationalCommission",fields:[commissions_international],references:[id])
+  nationalTotal Total @relation("NationalTotal",fields:[total_national],references:[id])
+  internationalTotal Total @relation("InternationalTotal",fields:[total_international],references:[id])
+  @@map("financial_data")
+}
+model Coupon {
+  id Int @id @default(autoincrement())
+  code String @unique
+  use CouponUse
+  value Float
+  type CouponType
+  start_date DateTime @default(now())
+  end_date DateTime @default(now())
+  limit_users Int @default(0)
+  country String?
+  status Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  assignments CouponAssignment[]
+  quoteCoupons QuoteCoupon[]
+  @@map("coupons")
+}
+model CouponAssignment {
+  id Int @id @default(autoincrement())
+  userId Int @map("user")
+  couponId Int @map("coupon")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  coupon Coupon @relation(fields:[couponId],references:[id])
+  @@map("coupon_assignments")
+}
+model QuoteCoupon {
+  quoteId Int @map("quote_id")
+  couponId Int @map("coupon_id")
+  quote Quote @relation(fields:[quoteId],references:[id])
+  coupon Coupon @relation(fields:[couponId],references:[id])
+  @@id([quoteId,couponId])
+  @@map("quote_coupons")
+}
+model CreditMyAccountBks {
+  id Int @id @default(autoincrement())
+  amount Int
+  uprn String
+  user_ref Int
+  status CreditStatus
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  amountRelation Amount @relation(fields:[amount],references:[id])
+  user User @relation(fields:[user_ref],references:[id])
+  @@map("credit_my_account_bks")
+}
+model Dispatch {
+  id Int @id @default(autoincrement())
+  type DispatchType
+  address String
+  date DateTime
+  time String
+  company String
+  dispatch_recipient String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("dispatches")
+}
+model Payment {
+  id Int @id @default(autoincrement())
+  userId Int @map("user")
+  amount Float
+  currency String @default("NGN")
+  payment_method PaymentMethod
+  payment_type PaymentType
+  transaction_reference String @unique
+  status PaymentStatus @default(Pending)
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  refunds Refund[]
+  @@index([userId,createdAt])
+  @@index([status])
+  @@map("payments")
+}
+model Refund {
+  id Int @id @default(autoincrement())
+  paymentId Int @map("payment")
+  amountId Int @map("amount")
+  reason String
+  status RefundStatus @default(Requested)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  payment Payment @relation(fields:[paymentId],references:[id])
+  amount Amount @relation(fields:[amountId],references:[id])
+  @@map("refunds")
+}
+model RefundRequest {
+  id Int @id @default(autoincrement())
+  request_number String @unique
+  reason String
+  additional_info String @default("")
+  url_photo Json @default("[]")
+  uprn String
+  quote_number Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  quote Quote @relation(fields:[quote_number],references:[id])
+  @@map("refund_requests")
+}
+model SecurityQuestionSet {
+  id Int @id @default(autoincrement())
+  questions Json
+  userId Int @map("user")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  @@map("security_question_sets")
+}
+model Notification {
+  id Int @id @default(autoincrement())
+  recipientId Int @map("recipient_id")
+  senderId Int? @map("sender_id")
+  title String
+  message String
+  type NotificationType @default(info)
+  isRead Boolean @default(false) @map("is_read")
+  category NotificationCategory
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  recipient User @relation("NotificationRecipient",fields:[recipientId],references:[id])
+  sender User? @relation("NotificationSender",fields:[senderId],references:[id])
+  @@index([recipientId,createdAt])
+  @@index([recipientId,isRead])
+  @@map("notifications")
+}
+model PaymentVerification {
+  id Int @id @default(autoincrement())
+  userId Int @map("user_id")
+  paymentMethod VerificationMethod @map("payment_method")
+  amount Float
+  currency String @default("NGN")
+  uprn String @unique
+  nameOnAccount String? @map("name_on_account")
+  registeredName String? @map("registered_name")
+  nameVerified Boolean @default(true) @map("name_verified")
+  status PaymentVerificationStatus @default(pending)
+  externalReference String? @map("external_reference")
+  squadRef String? @map("squad_ref")
+  failureReason String? @map("failure_reason")
+  metadata Json @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  @@index([userId,createdAt])
+  @@index([status])
+  @@index([squadRef])
+  @@map("payment_verifications")
+}
+model MinAmount {
+  id Int @id @default(autoincrement())
+  squad Float
+  stripe Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("min_amounts")
+}
+model Rate {
+  id Int @id @default(autoincrement())
+  rate_international_squad Float
+  rate_international_stripe Float
+  rate_national_squad Float
+  rate_national_stripe Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("rates")
+}
+model Transfer {
+  id Int @id @default(autoincrement())
+  code_transfer String @unique
+  status TransferStatus
+  amount String
+  userId Int @map("user")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields:[userId],references:[id])
+  @@map("transfers")
+}
+
+enum UserAccountType {
+  Personal
+  Merchant
+}
+enum ClientStatus {
+  Active
+  Inactive
+}
+enum WalletAccountType {
+  personal
+  merchant
+  ngo
+  government
+}
+enum WalletCurrency {
+  NGN
+  GHS
+  KES
+  ZAR
+  EGP
+  UGX
+  TZS
+  RWF
+  ETB
+  XAF
+  XOF
+  DZD
+  MAD
+  GBP
+  EUR
+  CHF
+  SEK
+  NOK
+  DKK
+  PLN
+  USD
+  CAD
+  MXN
+  CNY
+  JPY
+  INR
+  SGD
+  AED
+  SAR
+  QAR
+  ILS
+  KRW
+  THB
+  MYR
+  IDR
+  PKR
+  PHP
+  VND
+  AUD
+  NZD
+  BRL
+  ARS
+  CLP
+  COP
+  PEN
+}
+enum TransactionType {
+  transfer
+  deposit
+  withdrawal
+  invoice_payment
+  escrow_funding
+  escrow_release
+}
+enum TransactionStatus {
+  pending
+  success
+  completed
+  failed
+  reversed
+  pending_verification
+  processing
+}
+enum VerificationStatus {
+  not_required
+  pending
+  verified
+  failed
+}
+enum TransactionPaymentMethod {
+  card
+  bank
+  wallet
+  cash
+}
+enum PaymentGateway {
+  GTB
+  Switch
+  Internal
+  SquadCo
+}
+enum DepositStatus {
+  pending
+  successful
+  failed
+  reversed
+}
+enum WithdrawalFlow {
+  withdrawal
+  external_bank_transfer
+}
+enum WithdrawalStatus {
+  initiated
+  pending
+  processing
+  success
+  successful
+  failed
+  reversed
+}
+enum EscrowStatus {
+  CREATED
+  PARTIALLY_FUNDED
+  FUNDED
+  DELIVERED
+  RECEIVED
+  RELEASED
+  REFUNDED
+  DISPUTED
+  CANCELLED
+}
+enum EscrowTransactionType {
+  FUND
+  RELEASE
+  REFUND
+}
+enum EscrowTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+enum InvoiceStatus {
+  pending
+  paid
+  cancelled
+}
+enum InvoicePaymentStatus {
+  unpaid
+  pending
+  paid
+  failed
+}
+enum QuoteType {
+  RFQ
+  Order
+}
+enum QuoteCurrency {
+  NGN
+  USD
+  GBP
+}
+enum QuoteStatusValue {
+  Pending
+  Accepted
+  Rejected
+  Cancelled
+  Funded
+  Completed
+}
+enum DeliveryType {
+  Standard
+  Secure
+}
+enum TradeType {
+  Domestic
+  International
+}
+enum QuoteProgress {
+  Pending
+  Completed
+  Rejected
+}
+enum QuoteHistoryStatus {
+  Pending
+  Accepted
+  Rejected
+  Cancelled
+  Deleted
+}
+enum CouponUse {
+  Amount_N
+  Percentage
+}
+enum CouponType {
+  Limit_number_of_users @map("Limit number of users")
+  Unlimited
+}
+enum CreditStatus {
+  Pending
+  Accepted
+  Rejected
+}
+enum DispatchType {
+  Standard
+  Express
+}
+enum PaymentMethod {
+  Bank_Transfer @map("Bank Transfer")
+  Card
+  Wallet
+}
+enum PaymentType {
+  Escrow_Funding @map("Escrow Funding")
+  Escrow_Release @map("Escrow Release")
+  Escrow_Refund @map("Escrow Refund")
+  Wallet_Funding @map("Wallet Funding")
+}
+enum PaymentStatus {
+  Pending
+  Completed
+  Failed
+  Refunded
+}
+enum RefundStatus {
+  Requested
+  Processed
+  Rejected
+}
+enum NotificationType {
+  success
+  error
+  info
+  warning
+}
+enum NotificationCategory {
+  transfer
+  wallet
+  account
+  system
+}
+enum VerificationMethod {
+  card
+  bank_transfer
+  squad_api
+}
+enum PaymentVerificationStatus {
+  pending
+  verified
+  failed
+  expired
+}
+enum TransferStatus {
+  Refund
+  Pending
+  Completed
+}
+
+
+
+
