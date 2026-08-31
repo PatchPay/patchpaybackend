@@ -9,6 +9,8 @@ const {
 const {
   uploadDeliveryProof,
   handleDeliveryUploadError,
+  uploadBuyerConfirmationProof,
+  handleBuyerConfirmationUploadError,
 } = require("../middlewares/deliveryUploadMiddleware");
 const {
   createEscrow,
@@ -50,10 +52,12 @@ router.post(
 
 // Buyer confirms receipt -> triggers automatic atomic release to the seller.
 router.post(
-  "/:id/confirm-receipt",
+   "/:id/confirm-receipt",
   authenticateToken,
   checkEscrowPermission,
   checkEscrowAction("confirm-receipt"),
+  uploadBuyerConfirmationProof,
+  handleBuyerConfirmationUploadError,
   confirmEscrowReceipt,
 );
 
