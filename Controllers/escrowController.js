@@ -1025,98 +1025,243 @@ const markEscrowDelivered = async (
 // CONFIRM ESCROW RECEIPT + RELEASE
 // ============================================================
 
-const confirmEscrowReceipt = async (
-  req,
-  res
-) => {
+// ============================================================
+// BUYER CONFIRMS RECEIPT
+// Buyer uploads proof of the actual goods received
+// ============================================================
+
+const confirmEscrowReceipt = async (req, res) => {
+  const escrowId = req.params.id;
+  const userId = req.user.id;
+
+  const uploadedFilePath = req.file?.path;
+
   try {
-    const escrow =
-      await confirmReceiptAndRelease(
-        req.params.id,
-        req.user.id
+    // --------------------------------------------------------
+    // 1. Buyer must upload an image
+    // --------------------------------------------------------
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A buyer confirmation image is required",
+      });
+    }
+
+    if (!req.file.path) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Buyer confirmation image was received but could not be stored",
+      });
+    }
+
+    // --------------------------------------------------------
+    // 2. Find escrow
+    // --------------------------------------------------------
+
+    const escrow = await Escrow.findByPk(escrowId);
+
+    if (!escrow) {
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "escrow not found"
       );
 
-    // ========================================================
-    // 🔔 NOTIFICATION: ESCROW RELEASED
-    // ========================================================
+      return res.status(404).json({
+        success: false,
+        message: "Escrow not found",
+      });
+    }
+
+    // --------------------------------------------------------
+    // 3. ONLY BUYER / RECIPIENT CAN CONFIRM
+    // --------------------------------------------------------
+
+    const buyerMatch =
+      String(userId) === String(escrow.recipientId);
+
+    if (!buyerMatch) {
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "buyer authorization failed"
+      );
+
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only the buyer can confirm receipt",
+      });
+    }
+
+    // --------------------------------------------------------
+    // 4. Seller must have delivered first
+    // --------------------------------------------------------
+
+    if (escrow.status !== "DELIVERED") {
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "invalid escrow state"
+      );
+
+      return res.status(400).json({
+        success: false,
+        message:
+          `Buyer can only confirm receipt after the seller has marked the order as delivered. Current status: ${escrow.status}`,
+      });
+    }
+
+    // --------------------------------------------------------
+    // 5. Prevent duplicate buyer confirmation
+    // --------------------------------------------------------
+
+    if (
+      escrow.buyerReceived ||
+      escrow.buyerConfirmationProofUrl
+    ) {
+      await removeDeliveryProofFile(
+        uploadedFilePath,
+        "duplicate buyer confirmation"
+      );
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Receipt has already been confirmed",
+      });
+    }
+
+    // --------------------------------------------------------
+    // 6. Save buyer confirmation proof
+    // --------------------------------------------------------
+
+    const buyerConfirmedAt = new Date();
+
+    await escrow.update({
+      buyerConfirmationProofUrl:
+        `/uploads/receipt-confirmations/${req.file.filename}`,
+
+      buyerConfirmationProofPublicId:
+        null,
+
+      buyerReceived: true,
+
+      buyerReceivedAt:
+        buyerConfirmedAt,
+
+      status: "RECEIVED",
+    });
+
+    // --------------------------------------------------------
+    // 7. Release escrow
+    // --------------------------------------------------------
+
+    const releasedEscrow =
+      await confirmReceiptAndRelease(
+        escrow.id,
+        userId
+      );
+
+    // --------------------------------------------------------
+    // 8. Notify seller
+    // --------------------------------------------------------
 
     await createNotification({
       recipientId:
-        escrow.creatorId,
+        releasedEscrow.creatorId,
 
       senderId:
-        escrow.recipientId,
+        releasedEscrow.recipientId,
 
       title:
         "Escrow Funds Released",
 
       message:
-        `The buyer has confirmed receipt. ${escrow.amount} ${escrow.currency} has been released to you.`,
+        `The buyer has confirmed receipt of the goods. ${releasedEscrow.amount} ${releasedEscrow.currency} has been released to you.`,
 
-      type:
-        "success",
+      type: "success",
 
-      category:
-        "escrow",
+      category: "escrow",
 
       metadata: {
-        event:
-          "escrow_released",
+        event: "escrow_released",
 
         escrowId:
-          escrow.id,
+          releasedEscrow.id,
 
         escrowUprn:
-          escrow.escrowUprn,
+          releasedEscrow.escrowUprn,
 
         amount:
-          escrow.amount,
+          releasedEscrow.amount,
 
         currency:
-          escrow.currency,
+          releasedEscrow.currency,
 
         status:
-          escrow.status,
+          releasedEscrow.status,
+
+        buyerConfirmationProofUrl:
+          releasedEscrow.buyerConfirmationProofUrl,
+
+        buyerReceivedAt:
+          releasedEscrow.buyerReceivedAt,
 
         releaseTransactionId:
-          escrow.releaseTransactionId,
+          releasedEscrow.releaseTransactionId,
       },
     });
+
+    // --------------------------------------------------------
+    // 9. Response
+    // --------------------------------------------------------
 
     return res.status(200).json({
       success: true,
 
       message:
-        "Receipt confirmed; escrow funds released to the seller",
+        "Receipt confirmed and escrow funds released to the seller",
 
-      data:
-        escrow,
+      data: {
+        id: releasedEscrow.id,
+
+        status:
+          releasedEscrow.status,
+
+        buyerReceived:
+          releasedEscrow.buyerReceived,
+
+        buyerReceivedAt:
+          releasedEscrow.buyerReceivedAt,
+
+        buyerConfirmationProofUrl:
+          releasedEscrow.buyerConfirmationProofUrl,
+
+        releaseTransactionId:
+          releasedEscrow.releaseTransactionId,
+      },
     });
   } catch (error) {
+    await removeDeliveryProofFile(
+      uploadedFilePath,
+      "buyer confirmation failed"
+    );
+
+    console.error(
+      "Error confirming escrow receipt:",
+      error
+    );
+
     const statusCode =
       error.statusCode || 500;
 
-    if (statusCode >= 500) {
-      console.error(
-        "Error confirming escrow receipt:",
-        error.message
-      );
-
-      return res.status(
-        statusCode
-      ).json({
-        success: false,
-        message:
-          "Failed to confirm receipt and release escrow",
-      });
-    }
-
-    return res.status(
-      statusCode
-    ).json({
+    return res.status(statusCode).json({
       success: false,
       message:
-        error.message,
+        statusCode >= 500
+          ? "Failed to confirm receipt and release escrow"
+          : error.message,
     });
   }
 };

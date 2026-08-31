@@ -161,11 +161,13 @@ model Escrow {
   fundingTransactionId Int? @map("funding_transaction_id")
   releaseTransactionId Int? @map("release_transaction_id")
   refundTransactionId Int? @map("refund_transaction_id")
-  deliveryProofUrl String? @db.Text @map("delivery_proof_url")
-  deliveryProofPublicId String? @map("delivery_proof_public_id")
-  sellerDeliveredAt DateTime? @map("seller_delivered_at")
-  buyerReceived Boolean @default(false) @map("buyer_received")
-  buyerReceivedAt DateTime? @map("buyer_received_at")
+deliveryProofUrl              String?   @db.Text @map("delivery_proof_url")
+deliveryProofPublicId         String?   @map("delivery_proof_public_id")
+sellerDeliveredAt             DateTime? @map("seller_delivered_at")
+buyerReceived                 Boolean   @default(false) @map("buyer_received")
+buyerReceivedAt               DateTime? @map("buyer_received_at")
+buyerConfirmationProofUrl     String?   @db.Text @map("buyer_confirmation_proof_url")
+buyerConfirmationProofPublicId String?  @map("buyer_confirmation_proof_public_id")
   conditions String
   expiryDate DateTime? @map("expiry_date")
   description String
