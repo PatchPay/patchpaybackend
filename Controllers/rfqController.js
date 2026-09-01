@@ -1,7 +1,7 @@
 const User = require("../models/User");
 const Quote = require("../models/Quote");
 const Invitation = require("../models/Invitation");
-const QuoteHistory = require("../models/QuoteHistory");
+
 const {
   calculateTransactionFee,
   isInternationalTransaction,
@@ -308,22 +308,7 @@ const createRFQ = async (req, res) => {
 
 
 
-    // =========================
-    // Quote history
-    // =========================
-   await QuoteHistory.create({
-      quote: rfq.id,
-      user_data: {
-        id: sender.id,
-        firstName: sender.firstName,
-        surname: sender.surname,
-        phoneNumber: sender.phoneNumber,
-      },
-      status: "Pending",
-      action: "Created",
-      notificationDue: new Date(Date.now() + 72 * 60 * 60 * 1000),
-      notificationSent: false,
-    })
+    
 
     // =========================
     // Notifications
@@ -513,7 +498,9 @@ const cancelQuote = async (req, res) => {
     const userId = req.user.id;
 
     console.log("STEP: before quote lookup cancelQuote", { quoteId });
+
     const quote = await Quote.findByPk(quoteId);
+
     console.log("STEP: after quote lookup cancelQuote", {
       quoteFound: !!quote,
     });
@@ -525,7 +512,7 @@ const cancelQuote = async (req, res) => {
       });
     }
 
-    // Check if the user is the issuer of the quote
+    // Only the quote issuer can cancel it
     if (quote.user_data.id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -533,7 +520,6 @@ const cancelQuote = async (req, res) => {
       });
     }
 
-    // Check if the quote is in a cancellable state
     if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
@@ -541,95 +527,60 @@ const cancelQuote = async (req, res) => {
       });
     }
 
-    // Update the quote status to cancelled
     quote.status = "Cancelled";
-    console.log("STEP: before quote.save cancelQuote", {
-      quoteId: quote.id,
-      status: quote.status,
-    });
+
     await quote.save();
-    console.log("STEP: after quote.save cancelQuote", { quoteId: quote.id });
 
+    // Notifications only - NO QuoteHistory
     runAfterResponse("cancelQuote side effects", async () => {
-      // Create quote history entry
-      const quoteHistory = new QuoteHistory({
-        quote: quote.id,
-        user_data: quote.user_data,
-        status: "Cancelled",
-        action: "Cancelled by issuer",
-      });
-      console.log("STEP: before quoteHistory.save cancelQuote", {
-        quoteId: quote.id,
-      });
-      await quoteHistory.save();
-      console.log("STEP: after quoteHistory.save cancelQuote", {
-        quoteHistoryId: quoteHistory.id,
-      });
-
-      // Create notification for issuer
-      const issuerNotification = new Notification({
-        recipientId: quote.user_data.id,
-        senderId: userId,
-        title: "RFQ Cancelled",
-        message: `You have cancelled RFQ #${quote.quote_number}`,
-        type: "info",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-        },
-      });
-      console.log("STEP: before issuerNotification.save cancelQuote", {
-        quoteId: quote.id,
-      });
-      await issuerNotification.save();
-      console.log("STEP: after issuerNotification.save cancelQuote", {
-        notificationId: issuerNotification.id,
-      });
-
-      // Create notification for recipient
-      const recipientNotification = new Notification({
-        recipientId: quote.destinatary_user.id,
-        senderId: userId,
-        title: "RFQ Cancelled",
-        message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user_data.firstName} ${quote.user_data.surname}`,
-        type: "warning",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-          senderName: `${quote.user_data.firstName} ${quote.user_data.surname}`,
-        },
-      });
-      console.log("STEP: before recipientNotification.save cancelQuote", {
-        quoteId: quote.id,
-      });
-      await recipientNotification.save();
-      console.log("STEP: after recipientNotification.save cancelQuote", {
-        notificationId: recipientNotification.id,
-      });
-
-      // Send email notification to the recipient without blocking the response
-      console.log("STEP: sending cancellation email in background", {
-        quoteId: quote.id,
-      });
-      sendEmail(
-        quote.destinatary_user.email,
-        "Quote Cancelled",
-        `Quote #${quote.quote_number} has been cancelled by the issuer.`,
-      )
-        .then((info) => {
-          console.log("STEP: cancellation email sent", {
+      try {
+        const issuerNotification = new Notification({
+          recipientId: quote.user_data.id,
+          senderId: userId,
+          title: "RFQ Cancelled",
+          message: `You have cancelled RFQ #${quote.quote_number}`,
+          type: "info",
+          category: "system",
+          metadata: {
             quoteId: quote.id,
-            response: info.response,
-          });
-        })
-        .catch((emailError) => {
-          console.error("Error sending cancellation email:", emailError);
+            quoteNumber: quote.quote_number,
+          },
         });
+
+        await issuerNotification.save();
+
+        const recipientNotification = new Notification({
+          recipientId: quote.destinatary_user.id,
+          senderId: userId,
+          title: "RFQ Cancelled",
+          message: `RFQ #${quote.quote_number} has been cancelled by ${quote.user_data.firstName} ${quote.user_data.surname}`,
+          type: "warning",
+          category: "system",
+          metadata: {
+            quoteId: quote.id,
+            quoteNumber: quote.quote_number,
+            senderName: `${quote.user_data.firstName} ${quote.user_data.surname}`,
+          },
+        });
+
+        await recipientNotification.save();
+
+        if (quote.destinatary_user.email) {
+          await sendEmail(
+            quote.destinatary_user.email,
+            "Quote Cancelled",
+            `Quote #${quote.quote_number} has been cancelled by the issuer.`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Error in cancelQuote background side effects:",
+          error,
+        );
+      }
     });
 
-    const responseQuote = quote.toObject ? quote.toObject() : quote;
+    const responseQuote = quote.toJSON();
 
     return res.status(200).json({
       success: true,
@@ -638,6 +589,7 @@ const cancelQuote = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in cancelQuote:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Error cancelling quote",
@@ -652,7 +604,9 @@ const acceptQuote = async (req, res) => {
     const userId = req.user.id;
 
     console.log("STEP: before quote lookup acceptQuote", { quoteId });
+
     const quote = await Quote.findByPk(quoteId);
+
     console.log("STEP: after quote lookup acceptQuote", {
       quoteFound: !!quote,
     });
@@ -664,12 +618,17 @@ const acceptQuote = async (req, res) => {
       });
     }
 
-    // ✅ ADD LOGS HERE
     console.log("Logged in user:", userId.toString());
-    console.log("Quote recipient:", quote.destinatary_user.id.toString());
-    console.log("Quote creator:", quote.user_data.id.toString());
+    console.log(
+      "Quote recipient:",
+      quote.destinatary_user.id.toString(),
+    );
+    console.log(
+      "Quote creator:",
+      quote.user_data.id.toString(),
+    );
 
-    // Check if the user is the recipient of the quote
+    // Only the recipient/buyer can accept the quote
     if (quote.destinatary_user.id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -677,7 +636,6 @@ const acceptQuote = async (req, res) => {
       });
     }
 
-    // Check if the quote is in an acceptable state
     if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
@@ -685,117 +643,69 @@ const acceptQuote = async (req, res) => {
       });
     }
 
-    // Update the quote status to accepted
     quote.status = "Accepted";
-    console.log("STEP: before quote.save acceptQuote", {
-      quoteId: quote.id,
-      status: quote.status,
-    });
+
     await quote.save();
-    console.log("STEP: after quote.save acceptQuote", { quoteId: quote.id });
 
+    // Notifications only - NO QuoteHistory
     runAfterResponse("acceptQuote side effects", async () => {
-      // Create quote history entry
-      const quoteHistory = new QuoteHistory({
-        quote: quote.id,
-        user_data: quote.destinatary_user,
-        status: "Accepted",
-        action: "Accepted by recipient",
-        deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-      });
-      console.log("STEP: before quoteHistory.save acceptQuote", {
-        quoteId: quote.id,
-      });
-      await quoteHistory.save();
-      console.log("STEP: after quoteHistory.save acceptQuote", {
-        quoteHistoryId: quoteHistory.id,
-      });
+      try {
+        const issuerNotification = new Notification({
+          recipientId: quote.user_data.id,
+          senderId: userId,
+          title: "RFQ Accepted",
+          message: `Your RFQ #${quote.quote_number} has been accepted by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
+          type: "success",
+          category: "system",
+          metadata: {
+            quoteId: quote.id,
+            quoteNumber: quote.quote_number,
+            recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
+          },
+        });
 
-      // Create notification for issuer
-      const issuerNotification = new Notification({
-        recipientId: quote.user_data.id,
-        senderId: userId,
-        title: "RFQ Accepted",
-        message: `Your RFQ #${quote.quote_number} has been accepted by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
-        type: "success",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
-        },
-      });
-      console.log("STEP: before issuerNotification.save acceptQuote", {
-        quoteId: quote.id,
-      });
-      await issuerNotification.save();
-      console.log("STEP: after issuerNotification.save acceptQuote", {
-        notificationId: issuerNotification.id,
-      });
+        await issuerNotification.save();
 
-      // Create notification for recipient
-      const recipientNotification = new Notification({
-        recipientId: quote.destinatary_user.id,
-        senderId: userId,
-        title: "RFQ Accepted",
-        message: `You have accepted RFQ #${quote.quote_number}`,
-        type: "success",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-        },
-      });
-      console.log("STEP: before recipientNotification.save acceptQuote", {
-        quoteId: quote.id,
-      });
-      await recipientNotification.save();
-      console.log("STEP: after recipientNotification.save acceptQuote", {
-        notificationId: recipientNotification.id,
-      });
+        const recipientNotification = new Notification({
+          recipientId: quote.destinatary_user.id,
+          senderId: userId,
+          title: "RFQ Accepted",
+          message: `You have accepted RFQ #${quote.quote_number}`,
+          type: "success",
+          category: "system",
+          metadata: {
+            quoteId: quote.id,
+            quoteNumber: quote.quote_number,
+          },
+        });
 
-      // Send email notification to the issuer without blocking the response
-      console.log("STEP: dispatch acceptance email in background", {
-        quoteId: quote.id,
-      });
-      quote.user_data.email
-        .then((issuer) => {
-          if (!issuer?.email) {
-            console.error("Acceptance email skipped: issuer email missing", {
-              quoteId: quote.id,
-            });
-            return;
-          }
-          return sendEmail(
-            issuer.email,
+        await recipientNotification.save();
+
+        if (quote.user_data.email) {
+          await sendEmail(
+            quote.user_data.email,
             "Quote Accepted",
             `Quote #${quote.quote_number} has been accepted by the recipient.`,
           );
-        })
-        .then((info) => {
-          if (info) {
-            console.log("STEP: acceptance email sent", {
-              quoteId: quote.id,
-              response: info.response,
-            });
-          }
-        })
-        .catch((emailError) => {
-          console.error("Error sending acceptance email:", emailError);
-        });
+        }
+      } catch (error) {
+        console.error(
+          "Error in acceptQuote background side effects:",
+          error,
+        );
+      }
     });
-
-    const responseQuote = quote.toObject ? quote.toObject() : quote;
 
     return res.status(200).json({
       success: true,
       message: "Quote accepted successfully",
       data: {
-        quote: responseQuote,
+        quote: quote.toJSON(),
       },
     });
   } catch (error) {
     console.error("Error in acceptQuote:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Error accepting quote",
@@ -811,7 +721,9 @@ const rejectQuote = async (req, res) => {
     const { reason } = req.body;
 
     console.log("STEP: before quote lookup rejectQuote", { quoteId });
+
     const quote = await Quote.findByPk(quoteId);
+
     console.log("STEP: after quote lookup rejectQuote", {
       quoteFound: !!quote,
     });
@@ -823,7 +735,7 @@ const rejectQuote = async (req, res) => {
       });
     }
 
-    // Check if the user is the recipient of the quote
+    // Only recipient/buyer can reject
     if (quote.destinatary_user.id.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -831,7 +743,6 @@ const rejectQuote = async (req, res) => {
       });
     }
 
-    // Check if the quote is in a rejectable state
     if (quote.status !== "Pending") {
       return res.status(400).json({
         success: false,
@@ -839,117 +750,69 @@ const rejectQuote = async (req, res) => {
       });
     }
 
-    // Update the quote status to rejected
     quote.status = "Rejected";
-    console.log("STEP: before quote.save rejectQuote", {
-      quoteId: quote.id,
-      status: quote.status,
-    });
+
     await quote.save();
-    console.log("STEP: after quote.save rejectQuote", { quoteId: quote.id });
 
+    // Notifications only - NO QuoteHistory
     runAfterResponse("rejectQuote side effects", async () => {
-      // Create quote history entry
-      const quoteHistory = new QuoteHistory({
-        quote: quote.id,
-        user_data: quote.destinatary_user,
-        status: "Rejected",
-        action: `Rejected by recipient${reason ? ": " + reason : ""}`,
-        deletionDue: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-      });
-      console.log("STEP: before quoteHistory.save rejectQuote", {
-        quoteId: quote.id,
-      });
-      await quoteHistory.save();
-      console.log("STEP: after quoteHistory.save rejectQuote", {
-        quoteHistoryId: quoteHistory.id,
-      });
-
-      // Create notification for issuer
-      const issuerNotification = new Notification({
-        recipientId: quote.user_data.id,
-        senderId: userId,
-        title: "RFQ Rejected",
-        message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}${reason ? ". Reason: " + reason : ""}`,
-        type: "error",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-          recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
-          reason,
-        },
-      });
-      console.log("STEP: before issuerNotification.save rejectQuote", {
-        quoteId: quote.id,
-      });
-      await issuerNotification.save();
-      console.log("STEP: after issuerNotification.save rejectQuote", {
-        notificationId: issuerNotification.id,
-      });
-
-      // Create notification for recipient
-      const recipientNotification = new Notification({
-        recipientId: quote.destinatary_user.id,
-        senderId: userId,
-        title: "RFQ Rejected",
-        message: `You have rejected RFQ #${quote.quote_number}${reason ? ". Reason: " + reason : ""}`,
-        type: "info",
-        category: "system",
-        metadata: {
-          quoteId: quote.id,
-          quoteNumber: quote.quote_number,
-          reason,
-        },
-      });
-      console.log("STEP: before recipientNotification.save rejectQuote", {
-        quoteId: quote.id,
-      });
-      await recipientNotification.save();
-      console.log("STEP: after recipientNotification.save rejectQuote", {
-        notificationId: recipientNotification.id,
-      });
-
-      // Send email notification to the issuer without blocking the response
-      console.log("STEP: dispatch rejection email in background", {
-        quoteId: quote.id,
-      });
-      quote.user_data.email
-        .then((issuer) => {
-          if (!issuer?.email) {
-            console.error("Rejection email skipped: issuer email missing", {
-              quoteId: quote.id,
-            });
-            return;
-          }
-          return sendEmail(
-            issuer.email,
-            "Quote Rejected",
-            `Quote #${quote.quote_number} has been rejected by the recipient${reason ? ". Reason: " + reason : "."}`,
-          );
-        })
-        .then((info) => {
-          if (info) {
-            console.log("STEP: rejection email sent", {
-              quoteId: quote.id,
-              response: info.response,
-            });
-          }
-        })
-        .catch((emailError) => {
-          console.error("Error sending rejection email:", emailError);
+      try {
+        const issuerNotification = new Notification({
+          recipientId: quote.user_data.id,
+          senderId: userId,
+          title: "RFQ Rejected",
+          message: `Your RFQ #${quote.quote_number} has been rejected by ${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}${reason ? `. Reason: ${reason}` : ""}`,
+          type: "error",
+          category: "system",
+          metadata: {
+            quoteId: quote.id,
+            quoteNumber: quote.quote_number,
+            recipientName: `${quote.destinatary_user.firstName} ${quote.destinatary_user.surname}`,
+            reason,
+          },
         });
-    });
 
-    const responseQuote = quote.toObject ? quote.toObject() : quote;
+        await issuerNotification.save();
+
+        const recipientNotification = new Notification({
+          recipientId: quote.destinatary_user.id,
+          senderId: userId,
+          title: "RFQ Rejected",
+          message: `You have rejected RFQ #${quote.quote_number}${reason ? `. Reason: ${reason}` : ""}`,
+          type: "info",
+          category: "system",
+          metadata: {
+            quoteId: quote.id,
+            quoteNumber: quote.quote_number,
+            reason,
+          },
+        });
+
+        await recipientNotification.save();
+
+        if (quote.user_data.email) {
+          await sendEmail(
+            quote.user_data.email,
+            "Quote Rejected",
+            `Quote #${quote.quote_number} has been rejected by the recipient${reason ? `. Reason: ${reason}` : "."}`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Error in rejectQuote background side effects:",
+          error,
+        );
+      }
+    });
 
     return res.status(200).json({
       success: true,
       message: "Quote rejected successfully",
-      data: responseQuote,
+      data: quote.toJSON(),
     });
   } catch (error) {
     console.error("Error in rejectQuote:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Error rejecting quote",
@@ -1049,16 +912,21 @@ const checkQuoteNotifications = async () => {
     const deleteQuotes = await Quote.findAll({ where: { status: { [Op.in]: ["Accepted", "Rejected"] }, updatedAt: { [Op.lte]: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) } } });
 
     for (const quote of deleteQuotes) {
-      await quote.destroy();
-      const history = await QuoteHistory.findOne({ where: { quote: quote.id } });
-      if (history) await history.update({
-          status: "Deleted",
-          action: "Automatic Deletion",
-          deletedAt: now,
-      });
+      try {
+        await quote.destroy();
+
+        console.log(
+          `Quote ${quote.quote_number} automatically deleted`,
+        );
+      } catch (error) {
+        console.error(
+          `Error deleting quote ${quote.quote_number}:`,
+          error,
+        );
+      }
     }
   } catch (error) {
-    console.error("Error in checkQuoteNotifications:", error);
+    console.error("Error checking quote notifications:", error);
   }
 };
 
