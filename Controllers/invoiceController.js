@@ -9,7 +9,7 @@ const User = require("../models/User");
 const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
 const { createNotification } = require("../services/notificationService");
-const {generateDeliveryCode} = require("../utils/deliveryCode")
+
 
 // ============================================================
 // BUILD INVOICE FROM ACCEPTED QUOTE
@@ -96,7 +96,7 @@ const buildInvoiceFromAcceptedQuote = async (quote, transaction = null) => {
       quoteId: quote.id,
     }
   );
-  const deliverycode = generateDeliveryCode();
+
 
   const invoice = await Invoice.create(
     {
@@ -107,7 +107,7 @@ const buildInvoiceFromAcceptedQuote = async (quote, transaction = null) => {
       currency: quote.currency || "NGN",
       description: quote.product_description,
       status: "pending",
-      deliveryCode,
+
       paymentStatus: "unpaid",
 
       metadata: {
