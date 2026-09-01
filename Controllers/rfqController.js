@@ -13,6 +13,7 @@ const sequelize = require("../config/database");
 const nodemailer = require("nodemailer");
 const Notification = require("../models/Notification");
 const {sendRFQNotificationEmail} = require("../services/emailService");
+const {generateDeliveryCode} = require('../utils/deliveryCode')
 
 const runAfterResponse = (label, task) => {
   setImmediate(async () => {
@@ -257,6 +258,7 @@ const createRFQ = async (req, res) => {
     // =========================
     const quoteNumber = crypto.randomBytes(4).toString("hex").toUpperCase();
     const uprn = crypto.randomBytes(6).toString("hex").toUpperCase();
+    const deliveryCode = generateDeliveryCode();
 
     // =========================
     // Create RFQ
@@ -286,8 +288,8 @@ const createRFQ = async (req, res) => {
     phoneNumber: recipient.phoneNumber,
   },
 
-  delivery_code:
-    delivery_code || Math.floor(100000 + Math.random() * 900000),
+  delivery_code:deliveryCode,
+   
   delivery_type,
   trade_type,
   delivery_address,

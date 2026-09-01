@@ -210,7 +210,7 @@ model Invoice {
   recipientId Int @map("recipient_id")
   amount Float
   currency String @default("NGN")
-  deliveryCode String? @unique @map("delivery_code")
+
   description String
   status InvoiceStatus @default(pending)
   paymentStatus InvoicePaymentStatus @default(unpaid) @map("payment_status")

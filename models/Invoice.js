@@ -61,13 +61,7 @@ const Invoice = sequelize.define(
       allowNull: false,
     },
 
-    
-    deliveryCode: {
-      type: DataTypes.STRING(6),
-      allowNull: false,
-      unique: true,
-      field: "delivery_code",
-    },
+   
 
     status: {
       type: DataTypes.ENUM("pending", "paid", "cancelled"),
