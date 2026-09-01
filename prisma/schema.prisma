@@ -248,7 +248,7 @@ model Quote {
   status QuoteStatusValue @default(Pending)
   user_data Json
   destinatary_user Json
-  delivery_code Int
+  delivery_code String
   delivery_type DeliveryType
   trade_type TradeType
   delivery_address Json

@@ -74,8 +74,10 @@ const Quote = sequelize.define(
     },
 
     delivery_code: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING(6),
       allowNull: false,
+      unique: true,
+      field: "delivery_code",
     },
 
     delivery_type: {
