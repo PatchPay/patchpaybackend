@@ -267,41 +267,16 @@ model Quote {
   invoice Int?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  quoteStatuses QuoteStatus[]
-  quoteHistories QuoteHistory[]
+
+
   refundRequests RefundRequest[]
   quoteCoupons QuoteCoupon[]
   @@index([status,responseNotificationDue,notificationSent])
   @@index([status,updatedAt,deletionNotificationSent])
   @@map("quotes")
 }
-model QuoteStatus {
-  id Int @id @default(autoincrement())
-  quote Int
-  status QuoteProgress
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  quoteRelation Quote @relation(fields:[quote],references:[id])
-  @@map("quote_statuses")
-}
-model QuoteHistory {
-  id Int @id @default(autoincrement())
-  quote Int
-  user_data Json
-  status QuoteHistoryStatus
-  action String
-  notificationDue DateTime? @map("notification_due")
-  notificationSent Boolean @default(false) @map("notification_sent")
-  deletionDue DateTime? @map("deletion_due")
-  deletionNotificationSent Boolean @default(false) @map("deletion_notification_sent")
-  deletedAt DateTime? @map("deleted_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  quoteRelation Quote @relation(fields:[quote],references:[id])
-  @@index([notificationDue])
-  @@index([deletionDue])
-  @@index([quote,createdAt])
-  @@map("quote_histories")
-}
+
+
 model Bank {
   id Int @id @default(autoincrement())
   bankCode String @unique @map("bank_code")
