@@ -1,4 +1,5 @@
 const { DataTypes } = require("sequelize");
+
 const sequelize = require("../config/database");
 
 const Invoice = sequelize.define(
@@ -60,13 +61,26 @@ const Invoice = sequelize.define(
       allowNull: false,
     },
 
+    
+    deliveryCode: {
+      type: DataTypes.STRING(6),
+      allowNull: false,
+      unique: true,
+      field: "delivery_code",
+    },
+
     status: {
       type: DataTypes.ENUM("pending", "paid", "cancelled"),
       defaultValue: "pending",
     },
 
     paymentStatus: {
-      type: DataTypes.ENUM("unpaid", "pending", "paid", "failed"),
+      type: DataTypes.ENUM(
+        "unpaid",
+        "pending",
+        "paid",
+        "failed"
+      ),
       defaultValue: "unpaid",
       field: "payment_status",
     },
@@ -152,6 +166,10 @@ const Invoice = sequelize.define(
       },
       {
         fields: ["payment_status"],
+      },
+      {
+        fields: ["delivery_code"],
+        unique: true,
       },
     ],
   }
