@@ -194,14 +194,6 @@ Quote.associate = (models) => {
     foreignKey: "invoice",
   });
 
-  Quote.hasMany(models.QuoteStatus, {
-    foreignKey: "quote",
-  });
-
-  Quote.hasMany(models.QuoteHistory, {
-    foreignKey: "quote",
-  });
-
   Quote.hasMany(models.Request, {
     foreignKey: "quote_number",
   });
