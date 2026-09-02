@@ -1,10 +1,12 @@
 const sequelize = require("../config/database");
 
-const Escrow = require("../models/Escrow");
-const Invoice = require("../models/Invoice");
-const Quote = require("../models/Quote");
-const Transaction = require("../models/Transaction");
-const User = require("../models/User");
+const {
+  Invoice,
+  Escrow,
+  Quote,
+  Transaction,
+  User,
+} = require("../models");
 
 const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
