@@ -9,7 +9,7 @@ const {
 
 const {
   authenticateAdmin,
-  requireAdminRole,
+
 } = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
