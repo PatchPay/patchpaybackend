@@ -20,6 +20,7 @@ const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
 const transferRoutes = require("./routes/transferRoutes");
+const adminRoutes = require("./routes/adminauthRoutes")
 
 // Services
 const bankService = require("./services/bankService");
@@ -120,6 +121,7 @@ app.use("/api/escrow-transactions", escrowTransactionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/transfers", transferRoutes);
+app.use("/api/admin/auth", adminRoutes);
 
 /* ===========================
    ERROR HANDLING
