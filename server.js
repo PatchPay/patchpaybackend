@@ -121,7 +121,7 @@ app.use("/api/escrow-transactions", escrowTransactionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/transfers", transferRoutes);
-app.use("/api/admin", adminRoutes);
+app.use("/api/admin/auth", adminRoutes);
 
 /* ===========================
    ERROR HANDLING
