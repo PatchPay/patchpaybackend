@@ -1,9 +1,7 @@
 
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient();
+const prisma = require("../lib/prisma");
 
 const generateAdminToken = (admin) => {
   return jwt.sign(
@@ -30,25 +28,14 @@ const registerAdmin = async (req, res) => {
       email,
       password,
       role,
-      registrationSecret,
     } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "First name, last name, email and password are required",
-      });
-    }
-
-    // Protect admin registration
-    if (
-      process.env.ADMIN_REGISTRATION_SECRET &&
-      registrationSecret !== process.env.ADMIN_REGISTRATION_SECRET
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "Invalid admin registration secret",
+        message:
+          "First name, last name, email and password are required",
       });
     }
 

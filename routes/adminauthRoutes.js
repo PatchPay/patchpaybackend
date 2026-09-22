@@ -1,34 +1,28 @@
-
 const express = require("express");
-
-const {
-  registerAdmin,
-  loginAdmin,
-  getCurrentAdmin,
-} = require("../Controllers/adminAuthController");
-
-const {
-  authenticateAdmin,
-
-} = require("../middlewares/adminMiddleware");
-
 const router = express.Router();
+
+const adminAuthController = require("../Controllers/adminAuthController");
+const { authenticateAdmin } = require("../middlewares/adminMiddleware");
 
 /**
  * POST /api/admin/auth/register
  *
  * Register a new admin.
- *
- * This route is protected by ADMIN_REGISTRATION_SECRET.
  */
-router.post("/register", registerAdmin);
+router.post(
+  "/register",
+  adminAuthController.registerAdmin
+);
 
 /**
  * POST /api/admin/auth/login
  *
  * Login admin and receive JWT token.
  */
-router.post("/login", loginAdmin);
+router.post(
+  "/login",
+  adminAuthController.loginAdmin
+);
 
 /**
  * GET /api/admin/auth/me
@@ -38,8 +32,7 @@ router.post("/login", loginAdmin);
 router.get(
   "/me",
   authenticateAdmin,
-  getCurrentAdmin
+  adminAuthController.getCurrentAdmin
 );
 
 module.exports = router;
-
