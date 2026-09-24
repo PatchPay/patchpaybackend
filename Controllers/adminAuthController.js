@@ -24,14 +24,14 @@ const registerAdmin = async (req, res) => {
   try {
     const {
       firstName,
-      lastName,
+      middleName,
       email,
       password,
       role,
     } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !email || !password) {
+    if (!firstName || !middleName || !email || !password) {
       return res.status(400).json({
         success: false,
         message:
@@ -79,7 +79,7 @@ const registerAdmin = async (req, res) => {
     const admin = await prisma.admin.create({
       data: {
         firstName: firstName.trim(),
-        lastName: lastName.trim(),
+        middleName: middleName.trim(),
         email: normalizedEmail,
         password: hashedPassword,
         role: adminRole,
@@ -88,7 +88,7 @@ const registerAdmin = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         email: true,
         role: true,
         status: true,
@@ -198,7 +198,7 @@ const loginAdmin = async (req, res) => {
       admin: {
         id: admin.id,
         firstName: admin.firstName,
-        lastName: admin.lastName,
+        middleName: admin.middleName,
         email: admin.email,
         role: admin.role,
         status: admin.status,
