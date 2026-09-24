@@ -49,7 +49,7 @@ const authenticateAdmin = async (req, res, next) => {
       select: {
         id: true,
         firstName: true,
-        LastName: true,
+        lastName: true,
         email: true,
         role: true,
         status: true,
