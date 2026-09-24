@@ -14,7 +14,7 @@ const getAllUsers = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         surname: true,
         email: true,
         phoneNumber: true,
@@ -119,7 +119,7 @@ const getUserById = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         surname: true,
         email: true,
         phoneNumber: true,
@@ -177,7 +177,7 @@ const suspendUser = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         email: true,
         statusClient: true,
       },
@@ -207,7 +207,7 @@ const suspendUser = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         email: true,
         statusClient: true,
       },
@@ -278,7 +278,7 @@ const reinstateUser = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         email: true,
         statusClient: true,
       },
@@ -322,7 +322,7 @@ const deleteUser = async (req, res) => {
       select: {
         id: true,
         firstName: true,
-        lastName: true,
+        middleName: true,
         email: true,
       },
     });
