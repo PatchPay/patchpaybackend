@@ -70,11 +70,11 @@ const getUserStats = async (req, res) => {
         },
       }),
 
-      prisma.user.count({
-        where: {
-          statusClient: "Suspended",
-        },
-      }),
+    //   prisma.user.count({
+    //     where: {
+    //       statusClient: "Suspended",
+    //     },
+    //   }),
     ]);
 
     return res.status(200).json({
