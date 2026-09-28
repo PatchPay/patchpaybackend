@@ -2,7 +2,7 @@ const prisma = require("../lib/prisma");
 
 /**
  * ============================================
- * GET ALL RFQs / QUOTES
+ * GET ALL RFQs / quote
  * ============================================
  *
  * GET /api/admin/rfqs
@@ -39,7 +39,7 @@ const getAllRfqs = async (req, res) => {
     /**
      * Search by reference
      *
-     * Change `reference` below if your Quotes
+     * Change `reference` below if your quote
      * model uses a different field name.
      */
     if (search) {
@@ -49,8 +49,8 @@ const getAllRfqs = async (req, res) => {
       };
     }
 
-    const [quotes, total] = await Promise.all([
-      prisma.quotes.findMany({
+    const [quote, total] = await Promise.all([
+      prisma.quote.findMany({
         where,
         orderBy: {
           createdAt: "desc",
@@ -59,7 +59,7 @@ const getAllRfqs = async (req, res) => {
         take: limit,
       }),
 
-      prisma.quotes.count({
+      prisma.quote.count({
         where,
       }),
     ]);
@@ -75,8 +75,8 @@ const getAllRfqs = async (req, res) => {
         totalPages: Math.ceil(total / limit),
       },
 
-      count: quotes.length,
-      rfqs: quotes,
+      count: quote.length,
+      rfqs: quote,
     });
   } catch (error) {
     console.error("Admin get all RFQs error:", error);
@@ -109,7 +109,7 @@ const getRfqById = async (req, res) => {
       });
     }
 
-    const quote = await prisma.quotes.findUnique({
+    const quote = await prisma.quote.findUnique({
       where: {
         id: quoteId,
       },
@@ -154,15 +154,15 @@ const getRfqStats = async (req, res) => {
       acceptedRfqs,
       rejectedRfqs,
     ] = await Promise.all([
-      prisma.quotes.count(),
+      prisma.quote.count(),
 
-      prisma.quotes.count({
+      prisma.quote.count({
         where: {
           status: "ACCEPTED",
         },
       }),
 
-      prisma.quotes.count({
+      prisma.quote.count({
         where: {
           status: "REJECTED",
         },
