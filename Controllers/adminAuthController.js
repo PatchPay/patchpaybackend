@@ -233,9 +233,48 @@ const getCurrentAdmin = async (req, res) => {
   }
 };
 
+/**
+ * LOGOUT ADMIN
+ */
+const logoutAdmin = async (req, res) => {
+  try {
+    // req.admin is populated by authenticateAdmin middleware
+    if (req.admin) {
+      await prisma.adminAuditLog.create({
+        data: {
+          adminId: req.admin.id,
+          action: "ADMIN_LOGOUT",
+          resource: "ADMIN",
+          resourceId: String(req.admin.id),
+          description: "Admin logged out of the dashboard",
+          ipAddress:
+            req.ip ||
+            req.headers["x-forwarded-for"] ||
+            req.socket.remoteAddress ||
+            null,
+          metadata: {},
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin logged out successfully",
+    });
+  } catch (error) {
+    console.error("Admin logout error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Admin logout failed",
+    });
+  }
+};
+
 module.exports = {
   registerAdmin,
   loginAdmin,
   getCurrentAdmin,
+  logoutAdmin
 };
 
