@@ -35,4 +35,12 @@ router.get(
   adminAuthController.getCurrentAdmin
 );
 
+
+/**
+ * 
+ * POST /api/admin/auth/logout
+ 
+*/
+router.post("/log-out", authenticateAdmin, adminAuthController.logoutAdmin)
+
 module.exports = router;
