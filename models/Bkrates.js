@@ -1,2 +1,46 @@
-const { DataTypes } = require("sequelize"); const sequelize = require("../config/database");
-const BkRates = sequelize.define("BkRates", { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, code_transfer: { type: DataTypes.STRING, allowNull: false, unique: true }, amount: { type: DataTypes.INTEGER, allowNull: false, references: { model: "amounts", key: "id" } }, currency: { type: DataTypes.STRING, allowNull: false } }, { tableName: "bk_rates", underscored: true, timestamps: true }); BkRates.associate = (models) => { BkRates.belongsTo(models.Amount, { foreignKey: "amount" }); }; module.exports = BkRates;
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const BkRates = sequelize.define(
+  "BkRates",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+
+    code_transfer: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+
+    amount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: "amounts",
+        key: "id",
+      },
+    },
+
+    currency: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "bk_rates",
+    underscored: true,
+    timestamps: true,
+  }
+);
+
+BkRates.associate = (models) => {
+  BkRates.belongsTo(models.Amount, {
+    foreignKey: "amount",
+  });
+};
+
+module.exports = BkRates;

@@ -762,7 +762,7 @@ exports.calculateFee = async (req, res) => {
       });
     }
 
-    const feeDetails = calculateTransactionFee(
+    const feeDetails = await calculateTransactionFee(
       senderUser,
       recipientUser,
       amount,

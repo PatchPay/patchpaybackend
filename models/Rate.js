@@ -1,2 +1,42 @@
-const { DataTypes } = require("sequelize"); const sequelize = require("../config/database");
-const Rate = sequelize.define("Rate", { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, rate_international_squad: { type: DataTypes.FLOAT, allowNull: false }, rate_international_stripe: { type: DataTypes.FLOAT, allowNull: false }, rate_national_squad: { type: DataTypes.FLOAT, allowNull: false }, rate_national_stripe: { type: DataTypes.FLOAT, allowNull: false } }, { tableName: "rates", underscored: true, timestamps: true }); Rate.associate = () => {}; module.exports = Rate;
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const Rate = sequelize.define(
+  "Rate",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+
+    rate_international_squad: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+
+    rate_international_stripe: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+
+    rate_national_squad: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+
+    rate_national_stripe: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "rates",
+    underscored: true,
+    timestamps: true,
+  }
+);
+
+Rate.associate = () => {};
+
+module.exports = Rate;

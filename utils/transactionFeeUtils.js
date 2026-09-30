@@ -3,33 +3,7 @@
  * Handles fee calculations based on user type, country, and continent
  */
 
-// Transaction rate card per customer type
-const transactionRates = {
-  Personal: {
-    baseRate: 1.5,
-    countryRate: 0,
-    continentRate: 3,
-    multiContinentRate: 5,
-  },
-  Business: {
-    baseRate: 1.5,
-    countryRate: 10,
-    continentRate: 8,
-    multiContinentRate: 10,
-  },
-  NGO: {
-    baseRate: 1.5,
-    countryRate: 10,
-    continentRate: 6,
-    multiContinentRate: 6,
-  },
-  Government: {
-    baseRate: 1.5,
-    countryRate: 5,
-    continentRate: 10,
-    multiContinentRate: 15,
-  },
-};
+const prisma = require("../lib/prisma");
 
 // Map country codes to currencies
 const countryCurrencyMap = {
@@ -216,18 +190,27 @@ const determinePaymentGateway = (senderCountry, recipientCountry) => {
  * @param {Object} transactionLimits - Optional transaction limits object
  * @returns {Object} Transaction fee details
  */
-const calculateTransactionFee = (
+const calculateTransactionFee = async (
   senderUser,
   recipientUser,
   amount,
   transactionLimits = null,
 ) => {
-  const senderType = senderUser.accountType || "Personal";
-  const senderCountry = senderUser.countryCode || "NG";
-  const recipientCountry = recipientUser.countryCode || "NG";
-
-  // Get rate information for sender type
-  const rates = transactionRates[senderType] || transactionRates.Personal;
+  const accountType = senderUser.accountType || "Personal";
+  const senderType = accountType === "Merchant" ? "Business" : accountType;
+  const senderCountry = (senderUser.countryCode || "NG").toUpperCase();
+  const recipientCountry = (recipientUser.countryCode || "NG").toUpperCase();
+  const userType = senderType === "Government Org" ? "Government" : senderType;
+  if (!["Personal", "Business", "NGO", "Government"].includes(userType)) {
+    throw new Error(`Unsupported account type for transaction rates: ${senderType}`);
+  }
+  const rates = await prisma.rate.findFirst({ where: { userType, isActive: true } });
+  if (!rates) throw new Error(`No active transaction rate configured for ${senderType} accounts`);
+  for (const field of ["baseRate", "perCountry", "perContinentCountries", "acrossContinents"]) {
+    if (typeof rates[field] !== "number" || !Number.isFinite(rates[field])) {
+      throw new Error(`Active transaction rate for ${senderType} is incomplete`);
+    }
+  }
 
   // Initialize fee variables
   let feePercentage = rates.baseRate;
@@ -264,11 +247,11 @@ const calculateTransactionFee = (
     // Determine the type of international transaction
     if (isCrossContinentalTransaction(senderCountry, recipientCountry)) {
       // Cross-continental transaction
-      feePercentage = rates.multiContinentRate;
+      feePercentage = rates.baseRate + rates.acrossContinents;
       feeDescription = "Cross-continental transaction fee";
     } else {
       // Same continent but different countries
-      feePercentage = rates.continentRate;
+      feePercentage = rates.baseRate + rates.perContinentCountries;
       feeDescription = "International transaction fee (same continent)";
     }
 
@@ -277,7 +260,7 @@ const calculateTransactionFee = (
   } else {
     // Domestic transaction
     if (applyFee) {
-      flatFee = rates.countryRate;
+      feePercentage = rates.baseRate + rates.perCountry;
       feeDescription = "Domestic transaction fee";
     }
   }
@@ -291,6 +274,8 @@ const calculateTransactionFee = (
     flatFee,
     paymentGateway,
     feeDescription,
+    rateId: rates.id,
+    rateSnapshot: rates,
     isInternational: isInternationalTransaction(
       senderCountry,
       recipientCountry,

@@ -1,2 +1,40 @@
-const { DataTypes } = require("sequelize"); const sequelize = require("../config/database");
-const QuoteStatus = sequelize.define("QuoteStatus", { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, quote: { type: DataTypes.INTEGER, allowNull: false, references: { model: "quotes", key: "id" } }, status: { type: DataTypes.ENUM("Pending", "Completed", "Rejected"), allowNull: false } }, { tableName: "quote_statuses", underscored: true, timestamps: true }); QuoteStatus.associate = (models) => { QuoteStatus.belongsTo(models.Quote, { foreignKey: "quote" }); }; module.exports = QuoteStatus;
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
+
+const QuoteStatus = sequelize.define(
+  "QuoteStatus",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+
+    quote: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: "quotes",
+        key: "id",
+      },
+    },
+
+    status: {
+      type: DataTypes.ENUM("Pending", "Completed", "Rejected"),
+      allowNull: false,
+    },
+  },
+  {
+    tableName: "quote_statuses",
+    underscored: true,
+    timestamps: true,
+  }
+);
+
+QuoteStatus.associate = (models) => {
+  QuoteStatus.belongsTo(models.Quote, {
+    foreignKey: "quote",
+  });
+};
+
+module.exports = QuoteStatus;

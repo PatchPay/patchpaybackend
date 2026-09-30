@@ -120,6 +120,10 @@ const Quote = sequelize.define(
       allowNull: false,
     },
 
+    transaction_fee_percentage: { type: DataTypes.FLOAT, allowNull: true },
+    rate_id: { type: DataTypes.INTEGER, allowNull: true },
+    rate_snapshot: { type: DataTypes.JSONB, allowNull: true },
+
     subtotal: {
       type: DataTypes.FLOAT,
       allowNull: false,

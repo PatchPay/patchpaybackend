@@ -251,37 +251,40 @@ model Invoice {
 }
 
 model Quote {
-  id                       Int              @id @default(autoincrement())
-  quote_number             String           @unique
-  type                     QuoteType
-  product_description      String
-  product_quantity         Int
-  amount                   Float
-  currency                 QuoteCurrency
-  total                    Float
-  uprn                     String
-  status                   QuoteStatusValue @default(Pending)
-  user_data                Json
-  destinatary_user         Json
-  delivery_code            String
-  delivery_type            DeliveryType
-  trade_type               TradeType
-  delivery_address         Json
-  arrival_date             DateTime
-  arrival_time             String
-  line_total               Float
-  delivery_charge          Float
-  transaction_charges      Float
-  subtotal                 Float
-  proof_delivery           Int
-  coupon                   Json             @default("[]")
-  exchange_rate            Float            @default(1)
-  responseNotificationDue  DateTime?        @map("response_notification_due")
-  notificationSent         Boolean          @default(false) @map("notification_sent")
-  deletionNotificationSent Boolean          @default(false) @map("deletion_notification_sent")
-  invoice                  Int?
-  createdAt                DateTime         @default(now()) @map("created_at")
-  updatedAt                DateTime         @updatedAt @map("updated_at")
+  id                         Int              @id @default(autoincrement())
+  quote_number               String           @unique
+  type                       QuoteType
+  product_description        String
+  product_quantity           Int
+  amount                     Float
+  currency                   QuoteCurrency
+  total                      Float
+  uprn                       String
+  status                     QuoteStatusValue @default(Pending)
+  user_data                  Json
+  destinatary_user           Json
+  delivery_code              String
+  delivery_type              DeliveryType
+  trade_type                 TradeType
+  delivery_address           Json
+  arrival_date               DateTime
+  arrival_time               String
+  line_total                 Float
+  delivery_charge            Float
+  transaction_charges        Float
+  transaction_fee_percentage Float?           @map("transaction_fee_percentage")
+  rate_id                    Int?             @map("rate_id")
+  rate_snapshot              Json?            @map("rate_snapshot")
+  subtotal                   Float
+  proof_delivery             Int
+  coupon                     Json             @default("[]")
+  exchange_rate              Float            @default(1)
+  responseNotificationDue    DateTime?        @map("response_notification_due")
+  notificationSent           Boolean          @default(false) @map("notification_sent")
+  deletionNotificationSent   Boolean          @default(false) @map("deletion_notification_sent")
+  invoice                    Int?
+  createdAt                  DateTime         @default(now()) @map("created_at")
+  updatedAt                  DateTime         @updatedAt @map("updated_at")
 
   refundRequests RefundRequest[]
   quoteCoupons   QuoteCoupon[]
@@ -613,15 +616,37 @@ model MinAmount {
 }
 
 model Rate {
-  id                        Int      @id @default(autoincrement())
-  rate_international_squad  Float
-  rate_international_stripe Float
-  rate_national_squad       Float
-  rate_national_stripe      Float
-  createdAt                 DateTime @default(now()) @map("created_at")
-  updatedAt                 DateTime @updatedAt @map("updated_at")
+  id                          Int           @id @default(autoincrement())
+  userType                    RateUserType? @unique @map("user_type")
+  baseRate                    Float?        @map("base_rate")
+  minTransaction              Float?        @map("min_transaction")
+  perCountry                  Float?        @map("per_country")
+  perContinentCountries       Float?        @map("per_continent_countries")
+  acrossContinents            Float?        @map("across_continents")
+  bankPerCountryAmount        Float?        @map("bank_per_country_amount")
+  bankPerCountryPercent       Float?        @map("bank_per_country_percent")
+  bankPerContinentAmount      Float?        @map("bank_per_continent_amount")
+  bankPerContinentPercent     Float?        @map("bank_per_continent_percent")
+  bankAcrossContinentsAmount  Float?        @map("bank_across_continents_amount")
+  bankAcrossContinentsPercent Float?        @map("bank_across_continents_percent")
+  exchangeRateSource          String?       @map("exchange_rate_source")
+  exchangeRateMargin          Float?        @map("exchange_rate_margin")
+  isActive                    Boolean       @default(true) @map("is_active")
+  rate_international_squad    Float
+  rate_international_stripe   Float
+  rate_national_squad         Float
+  rate_national_stripe        Float
+  createdAt                   DateTime      @default(now()) @map("created_at")
+  updatedAt                   DateTime      @updatedAt @map("updated_at")
 
   @@map("rates")
+}
+
+enum RateUserType {
+  Personal
+  Business
+  NGO
+  Government
 }
 
 model Transfer {
