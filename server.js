@@ -25,6 +25,7 @@ const adminUsersRoutes = require("./routes/adminUsersRoutes");
 const adminTransactionsRoutes = require("./routes/admintransRoutes");
 const adminRfqsRoutes = require("./routes/adminrfqRoutes");
 const adminEscrowRoutes = require("./routes/adminescrowRoutes");
+const adminRateRoutes = require("./routes/adminRateRoutes");
 
 // Services
 const bankService = require("./services/bankService");
@@ -130,6 +131,7 @@ app.use("/api/admin/users", adminUsersRoutes);
 app.use("/api/admin/transactions", adminTransactionsRoutes);
 app.use("/api/admin/rfqs", adminRfqsRoutes);
 app.use("/api/admin/escrows", adminEscrowRoutes);
+app.use("/api/admin/rates", adminRateRoutes);
 /* ===========================
    ERROR HANDLING
 =========================== */

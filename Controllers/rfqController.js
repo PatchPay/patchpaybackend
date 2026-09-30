@@ -229,17 +229,16 @@ const createRFQ = async (req, res) => {
     // =========================
     const numericAmount = Number(amount);
     const numericDelivery = Number(delivery_charge || 0);
-    const numericTransaction = Number(transaction_charges || 0);
 
     const lineTotal = numericAmount;
-    const total = numericAmount + numericDelivery + numericTransaction;
-
-    // Fee calculation (kept your existing logic)
-    const feeDetails = calculateTransactionFee(
+    // Compute the transaction charge on the server from the active rate card.
+    const feeDetails = await calculateTransactionFee(
       sender,
       recipient,
       numericAmount,
     );
+    const numericTransaction = feeDetails.feeAmount;
+    const total = numericAmount + numericDelivery + numericTransaction;
 
     let exchangeRate = 1;
 
@@ -298,7 +297,10 @@ const createRFQ = async (req, res) => {
   line_total: numericAmount,
   delivery_charge: numericDelivery,
   transaction_charges: numericTransaction,
-  subtotal: subtotal || total,
+  transaction_fee_percentage: feeDetails.feePercentage,
+  rate_id: feeDetails.rateId,
+  rate_snapshot: feeDetails.rateSnapshot,
+  subtotal: numericAmount + numericDelivery,
  proof_delivery: Math.floor(Date.now() / 1000),
   coupon: [],
   exchange_rate: exchangeRate,
