@@ -1,84 +1,97 @@
+
 /**
  * Transaction Fee Utility Functions
- * Handles fee calculations based on user type, country, and continent
+ *
+ * Handles:
+ * - Currency detection
+ * - Country/continent detection
+ * - Domestic vs international transactions
+ * - Squad vs Stripe transaction rates
+ * - Transaction fee calculation
  */
 
 const prisma = require("../lib/prisma");
 
-// Map country codes to currencies
+// ============================================================
+// COUNTRY → CURRENCY
+// ============================================================
+
 const countryCurrencyMap = {
-  // 🌍 Africa
-  NG: "NGN", // Nigeria
-  GH: "GHS", // Ghana
-  KE: "KES", // Kenya
-  ZA: "ZAR", // South Africa
-  EG: "EGP", // Egypt
-  UG: "UGX", // Uganda
-  TZ: "TZS", // Tanzania
-  RW: "RWF", // Rwanda
-  ET: "ETB", // Ethiopia
-  CM: "XAF", // Central African CFA
-  SN: "XOF", // West African CFA
-  CI: "XOF", // Ivory Coast
-  ML: "XOF", // Mali
-  BF: "XOF", // Burkina Faso
-  NE: "XOF", // Niger
-  TG: "XOF", // Togo
-  BJ: "XOF", // Benin
-  DZ: "DZD", // Algeria
-  MA: "MAD", // Morocco
+  // Africa
+  NG: "NGN",
+  GH: "GHS",
+  KE: "KES",
+  ZA: "ZAR",
+  EG: "EGP",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  ET: "ETB",
+  CM: "XAF",
+  SN: "XOF",
+  CI: "XOF",
+  ML: "XOF",
+  BF: "XOF",
+  NE: "XOF",
+  TG: "XOF",
+  BJ: "XOF",
+  DZ: "DZD",
+  MA: "MAD",
 
-  // 🌍 Europe
-  GB: "GBP", // United Kingdom
-  DE: "EUR", // Germany
-  FR: "EUR", // France
-  IT: "EUR", // Italy
-  ES: "EUR", // Spain
-  NL: "EUR", // Netherlands
-  BE: "EUR", // Belgium
-  PT: "EUR", // Portugal
-  IE: "EUR", // Ireland
-  CH: "CHF", // Switzerland
-  SE: "SEK", // Sweden
-  NO: "NOK", // Norway
-  DK: "DKK", // Denmark
-  PL: "PLN", // Poland
+  // Europe
+  GB: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  NL: "EUR",
+  BE: "EUR",
+  PT: "EUR",
+  IE: "EUR",
+  CH: "CHF",
+  SE: "SEK",
+  NO: "NOK",
+  DK: "DKK",
+  PL: "PLN",
 
-  // 🌎 North America
-  US: "USD", // United States
-  CA: "CAD", // Canada
-  MX: "MXN", // Mexico
+  // North America
+  US: "USD",
+  CA: "CAD",
+  MX: "MXN",
 
-  // 🌏 Asia
-  CN: "CNY", // China
-  JP: "JPY", // Japan
-  IN: "INR", // India
-  SG: "SGD", // Singapore
-  AE: "AED", // UAE
-  SA: "SAR", // Saudi Arabia
-  QA: "QAR", // Qatar
-  IL: "ILS", // Israel
-  KR: "KRW", // South Korea
-  TH: "THB", // Thailand
-  MY: "MYR", // Malaysia
-  ID: "IDR", // Indonesia
-  PK: "PKR", // Pakistan
-  PH: "PHP", // Philippines
-  VN: "VND", // Vietnam
+  // Asia
+  CN: "CNY",
+  JP: "JPY",
+  IN: "INR",
+  SG: "SGD",
+  AE: "AED",
+  SA: "SAR",
+  QA: "QAR",
+  IL: "ILS",
+  KR: "KRW",
+  TH: "THB",
+  MY: "MYR",
+  ID: "IDR",
+  PK: "PKR",
+  PH: "PHP",
+  VN: "VND",
 
-  // 🌏 Oceania
-  AU: "AUD", // Australia
-  NZ: "NZD", // New Zealand
+  // Oceania
+  AU: "AUD",
+  NZ: "NZD",
 
-  // 🌎 South America
-  BR: "BRL", // Brazil
-  AR: "ARS", // Argentina
-  CL: "CLP", // Chile
-  CO: "COP", // Colombia
-  PE: "PEN", // Peru
+  // South America
+  BR: "BRL",
+  AR: "ARS",
+  CL: "CLP",
+  CO: "COP",
+  PE: "PEN",
 };
 
-// Map countries to continents
+// ============================================================
+// COUNTRY → CONTINENT
+// ============================================================
+
 const countryContinentMap = {
   // Africa
   NG: "Africa",
@@ -86,6 +99,20 @@ const countryContinentMap = {
   KE: "Africa",
   ZA: "Africa",
   EG: "Africa",
+  UG: "Africa",
+  TZ: "Africa",
+  RW: "Africa",
+  ET: "Africa",
+  CM: "Africa",
+  SN: "Africa",
+  CI: "Africa",
+  ML: "Africa",
+  BF: "Africa",
+  NE: "Africa",
+  TG: "Africa",
+  BJ: "Africa",
+  DZ: "Africa",
+  MA: "Africa",
 
   // Europe
   GB: "Europe",
@@ -93,6 +120,15 @@ const countryContinentMap = {
   FR: "Europe",
   IT: "Europe",
   ES: "Europe",
+  NL: "Europe",
+  BE: "Europe",
+  PT: "Europe",
+  IE: "Europe",
+  CH: "Europe",
+  SE: "Europe",
+  NO: "Europe",
+  DK: "Europe",
+  PL: "Europe",
 
   // North America
   US: "North America",
@@ -104,8 +140,19 @@ const countryContinentMap = {
   JP: "Asia",
   IN: "Asia",
   SG: "Asia",
+  AE: "Asia",
+  SA: "Asia",
+  QA: "Asia",
+  IL: "Asia",
+  KR: "Asia",
+  TH: "Asia",
+  MY: "Asia",
+  ID: "Asia",
+  PK: "Asia",
+  PH: "Asia",
+  VN: "Asia",
 
-  // Australia/Oceania
+  // Oceania
   AU: "Australia",
   NZ: "Australia",
 
@@ -113,221 +160,470 @@ const countryContinentMap = {
   BR: "South America",
   AR: "South America",
   CL: "South America",
+  CO: "South America",
+  PE: "South America",
+};
+
+// ============================================================
+// COUNTRY HELPERS
+// ============================================================
+
+const normalizeCountryCode = (countryCode) => {
+  if (!countryCode || typeof countryCode !== "string") {
+    return null;
+  }
+
+  return countryCode.trim().toUpperCase();
 };
 
 /**
- * Get the appropriate currency for a country
- * @param {string} countryCode - ISO country code
- * @returns {string} Currency code
- * @throws {Error} If currency cannot be determined for the country code
+ * Get currency for a country code.
  */
 const getCurrencyForCountry = (countryCode) => {
-  const currency = countryCurrencyMap[countryCode];
+  const normalizedCode = normalizeCountryCode(countryCode);
+
+  if (!normalizedCode) {
+    throw new Error("Country code is required");
+  }
+
+  const currency = countryCurrencyMap[normalizedCode];
+
   if (!currency) {
-    console.error(`No currency mapping found for country code: ${countryCode}`);
+    console.error(
+      `No currency mapping found for country code: ${normalizedCode}`
+    );
+
     throw new Error(
-      `Cannot determine currency for country code: ${countryCode}`,
+      `Cannot determine currency for country code: ${normalizedCode}`
     );
   }
+
   return currency;
 };
 
 /**
- * Get the continent for a country
- * @param {string} countryCode - ISO country code
- * @returns {string} Continent name
+ * Get continent for a country code.
  */
 const getContinentForCountry = (countryCode) => {
-  return countryContinentMap[countryCode] || "Unknown";
+  const normalizedCode = normalizeCountryCode(countryCode);
+
+  if (!normalizedCode) {
+    return "Unknown";
+  }
+
+  return countryContinentMap[normalizedCode] || "Unknown";
 };
 
 /**
- * Determine if a transaction is international
- * @param {string} senderCountry - Sender's country code
- * @param {string} recipientCountry - Recipient's country code
- * @returns {boolean} True if international transaction
+ * Determine whether transaction is international.
+ *
+ * Same country:
+ * NG → NG = false
+ *
+ * Different countries:
+ * NG → GH = true
  */
-const isInternationalTransaction = (senderCountry, recipientCountry) => {
-  return senderCountry !== recipientCountry;
+const isInternationalTransaction = (
+  senderCountry,
+  recipientCountry
+) => {
+  const sender = normalizeCountryCode(senderCountry);
+  const recipient = normalizeCountryCode(recipientCountry);
+
+  return sender !== recipient;
 };
 
 /**
- * Determine if a transaction is cross-continental
- * @param {string} senderCountry - Sender's country code
- * @param {string} recipientCountry - Recipient's country code
- * @returns {boolean} True if cross-continental transaction
+ * Determine whether transaction crosses continents.
+ *
+ * NG → GH = false
+ * NG → GB = true
  */
-const isCrossContinentalTransaction = (senderCountry, recipientCountry) => {
+const isCrossContinentalTransaction = (
+  senderCountry,
+  recipientCountry
+) => {
   const senderContinent = getContinentForCountry(senderCountry);
   const recipientContinent = getContinentForCountry(recipientCountry);
+
+  if (
+    senderContinent === "Unknown" ||
+    recipientContinent === "Unknown"
+  ) {
+    return false;
+  }
+
   return senderContinent !== recipientContinent;
 };
 
-/**
- * Determine which payment gateway to use
- * @param {string} senderCountry - Sender's country code
- * @param {string} recipientCountry - Recipient's country code
- * @returns {string} Payment gateway to use ('GTB' or 'Switch')
- */
-const determinePaymentGateway = (senderCountry, recipientCountry) => {
-  const senderContinent = getContinentForCountry(senderCountry);
-  const recipientContinent = getContinentForCountry(recipientCountry);
+// ============================================================
+// PAYMENT PROVIDER
+// ============================================================
 
-  // If both countries are in Africa, use GTB
-  if (senderContinent === "Africa" && recipientContinent === "Africa") {
-    return "GTB";
+/**
+ * Normalize provider name.
+ *
+ * Accepts:
+ * - Squad
+ * - squad
+ * - Stripe
+ * - stripe
+ */
+const normalizePaymentProvider = (provider) => {
+  if (!provider) {
+    return "squad";
   }
 
-  // For all other cases, use Switch
-  return "Switch";
+  const normalized = String(provider).trim().toLowerCase();
+
+  if (normalized === "squad") {
+    return "squad";
+  }
+
+  if (normalized === "stripe") {
+    return "stripe";
+  }
+
+  throw new Error(
+    `Unsupported payment provider: ${provider}. Expected Squad or Stripe.`
+  );
 };
 
 /**
- * Calculate transaction fee based on user types, countries, and transaction amount
- * @param {Object} senderUser - Sender user object
- * @param {Object} recipientUser - Recipient user object
- * @param {number} amount - Transaction amount
- * @param {Object} transactionLimits - Optional transaction limits object
- * @returns {Object} Transaction fee details
+ * Determine payment gateway.
+ *
+ * This keeps your existing gateway behavior:
+ *
+ * Africa → Africa = GTB
+ * Everything else = Switch
+ *
+ * NOTE:
+ * This is separate from the RATE provider.
+ * The rate provider is Squad or Stripe.
+ */
+const determinePaymentGateway = (
+  senderCountry,
+  recipientCountry
+) => {
+  const senderContinent = getContinentForCountry(senderCountry);
+  const recipientContinent = getContinentForCountry(recipientCountry);
+
+  if (
+    senderContinent === "Africa" &&
+    recipientContinent === "Africa"
+  ) {
+    return "GTB";
+  }
+
+  return "Switch";
+};
+
+// ============================================================
+// RATE SELECTION
+// ============================================================
+
+/**
+ * Select the correct database field from the Rate model.
+ *
+ * Your current Rate model contains ONLY:
+ *
+ * rate_international_squad
+ * rate_international_stripe
+ * rate_national_squad
+ * rate_national_stripe
+ */
+const getRateField = ({
+  isInternational,
+  paymentProvider,
+}) => {
+  if (isInternational) {
+    return paymentProvider === "stripe"
+      ? "rate_international_stripe"
+      : "rate_international_squad";
+  }
+
+  return paymentProvider === "stripe"
+    ? "rate_national_stripe"
+    : "rate_national_squad";
+};
+
+// ============================================================
+// GET ACTIVE RATE
+// ============================================================
+
+/**
+ * Get the configured rate from the database.
+ *
+ * Since the current Rate model does NOT have:
+ * - userType
+ * - isActive
+ *
+ * we simply retrieve the configured rate.
+ *
+ * If you eventually want multiple rate configurations,
+ * we can add a status/type field later.
+ */
+const getTransactionRate = async ({
+  isInternational,
+  paymentProvider,
+}) => {
+  const rateField = getRateField({
+    isInternational,
+    paymentProvider,
+  });
+
+  const rate = await prisma.rate.findFirst({
+    orderBy: {
+      id: "desc",
+    },
+  });
+
+  if (!rate) {
+    throw new Error(
+      "No transaction rate configuration found"
+    );
+  }
+
+  const rateValue = rate[rateField];
+
+  if (
+    typeof rateValue !== "number" ||
+    !Number.isFinite(rateValue) ||
+    rateValue < 0
+  ) {
+    throw new Error(
+      `Invalid configured transaction rate: ${rateField}`
+    );
+  }
+
+  return {
+    rate,
+    rateField,
+    rateValue,
+  };
+};
+
+// ============================================================
+// TRANSACTION FEE CALCULATION
+// ============================================================
+
+/**
+ * Calculate transaction fee.
+ *
+ * @param {Object} senderUser
+ * @param {Object} recipientUser
+ * @param {number} amount
+ * @param {string} paymentProvider - "squad" or "stripe"
+ * @param {Object|null} transactionLimits
+ *
+ * Example:
+ *
+ * calculateTransactionFee(
+ *   senderUser,
+ *   recipientUser,
+ *   100000,
+ *   "squad"
+ * );
  */
 const calculateTransactionFee = async (
   senderUser,
   recipientUser,
   amount,
-  transactionLimits = null,
+  paymentProvider = "squad",
+  transactionLimits = null
 ) => {
-  const accountType = senderUser.accountType || "Personal";
-  const senderType = accountType === "Merchant" ? "Business" : accountType;
-  const senderCountry = (senderUser.countryCode || "NG").toUpperCase();
-  const recipientCountry = (recipientUser.countryCode || "NG").toUpperCase();
-  const userType = senderType === "Government Org" ? "Government" : senderType;
-  if (!["Personal", "Business", "NGO", "Government"].includes(userType)) {
-    throw new Error(`Unsupported account type for transaction rates: ${senderType}`);
-  }
-  const rates = await prisma.rate.findFirst({ where: { userType, isActive: true } });
-  if (!rates) throw new Error(`No active transaction rate configured for ${senderType} accounts`);
-  for (const field of ["baseRate", "perCountry", "perContinentCountries", "acrossContinents"]) {
-    if (typeof rates[field] !== "number" || !Number.isFinite(rates[field])) {
-      throw new Error(`Active transaction rate for ${senderType} is incomplete`);
-    }
+  if (!senderUser) {
+    throw new Error("Sender user is required");
   }
 
-  // Initialize fee variables
-  let feePercentage = rates.baseRate;
-  let flatFee = 0;
-  let paymentGateway = "GTB";
-  let feeDescription = "Base transaction fee";
+  if (!recipientUser) {
+    throw new Error("Recipient user is required");
+  }
 
-  // Check if transaction is within unlimited transaction period or amount
+  if (
+    amount === null ||
+    amount === undefined ||
+    !Number.isFinite(Number(amount)) ||
+    Number(amount) < 0
+  ) {
+    throw new Error("Invalid transaction amount");
+  }
+
+  amount = Number(amount);
+
+  const provider = normalizePaymentProvider(paymentProvider);
+
+  const senderCountry = normalizeCountryCode(
+    senderUser.countryCode || "NG"
+  );
+
+  const recipientCountry = normalizeCountryCode(
+    recipientUser.countryCode || "NG"
+  );
+
+  const isInternational = isInternationalTransaction(
+    senderCountry,
+    recipientCountry
+  );
+
+  const isCrossContinental = isCrossContinentalTransaction(
+    senderCountry,
+    recipientCountry
+  );
+
+  const paymentGateway = determinePaymentGateway(
+    senderCountry,
+    recipientCountry
+  );
+
+  // ----------------------------------------------------------
+  // Get configured rate
+  // ----------------------------------------------------------
+
+  const {
+    rate,
+    rateField,
+    rateValue,
+  } = await getTransactionRate({
+    isInternational,
+    paymentProvider: provider,
+  });
+
+  // ----------------------------------------------------------
+  // Transaction limits
+  // ----------------------------------------------------------
+
   let applyFee = true;
-  if (transactionLimits) {
+
+  let feeDescription = isInternational
+    ? "International transaction fee"
+    : "Domestic transaction fee";
+
+  /**
+   * Transaction limits are still supported if your
+   * transaction code passes them in.
+   *
+   * International transactions always pay the configured
+   * international rate.
+   */
+  if (transactionLimits && !isInternational) {
     if (
       transactionLimits.type === "unlimited_until_date" &&
-      new Date() < new Date(transactionLimits.endDate) &&
-      !isInternationalTransaction(senderCountry, recipientCountry)
+      transactionLimits.endDate &&
+      new Date() < new Date(transactionLimits.endDate)
     ) {
       applyFee = false;
+
       feeDescription =
         "Fee waived - Unlimited transactions until " +
-        new Date(transactionLimits.endDate).toLocaleDateString();
-    } else if (
+        new Date(
+          transactionLimits.endDate
+        ).toLocaleDateString();
+    }
+
+    if (
       transactionLimits.type === "unlimited_until_amount" &&
-      transactionLimits.currentAmount < transactionLimits.maxAmount &&
-      !isInternationalTransaction(senderCountry, recipientCountry)
+      Number(transactionLimits.currentAmount) <
+        Number(transactionLimits.maxAmount)
     ) {
       applyFee = false;
-      feeDescription = `Fee waived - Unlimited transactions until ${transactionLimits.maxAmount} is reached`;
+
+      feeDescription =
+        `Fee waived - Unlimited transactions until ${transactionLimits.maxAmount} is reached`;
     }
   }
 
-  // For international transactions, always apply fees
-  if (isInternationalTransaction(senderCountry, recipientCountry)) {
+  // International transactions always use their configured rate.
+  if (isInternational) {
     applyFee = true;
 
-    // Determine the type of international transaction
-    if (isCrossContinentalTransaction(senderCountry, recipientCountry)) {
-      // Cross-continental transaction
-      feePercentage = rates.baseRate + rates.acrossContinents;
+    if (isCrossContinental) {
       feeDescription = "Cross-continental transaction fee";
     } else {
-      // Same continent but different countries
-      feePercentage = rates.baseRate + rates.perContinentCountries;
-      feeDescription = "International transaction fee (same continent)";
-    }
-
-    // Determine payment gateway
-    paymentGateway = determinePaymentGateway(senderCountry, recipientCountry);
-  } else {
-    // Domestic transaction
-    if (applyFee) {
-      feePercentage = rates.baseRate + rates.perCountry;
-      feeDescription = "Domestic transaction fee";
+      feeDescription =
+        "International transaction fee (same continent)";
     }
   }
 
-  // Calculate the fee amount
-  const feeAmount = applyFee ? amount * (feePercentage / 100) + flatFee : 0;
+  // ----------------------------------------------------------
+  // Calculate fee
+  // ----------------------------------------------------------
+
+  const feePercentage = rateValue;
+
+  const flatFee = 0;
+
+  const feeAmount = applyFee
+    ? amount * (feePercentage / 100) + flatFee
+    : 0;
+
+  // ----------------------------------------------------------
+  // Return transaction fee information
+  // ----------------------------------------------------------
 
   return {
     feeAmount,
     feePercentage,
     flatFee,
+
+    paymentProvider: provider,
+
     paymentGateway,
+
     feeDescription,
-    rateId: rates.id,
-    rateSnapshot: rates,
-    isInternational: isInternationalTransaction(
-      senderCountry,
-      recipientCountry,
+
+    rateId: rate.id,
+
+    rateField,
+
+    rateSnapshot: rate,
+
+    isInternational,
+
+    isCrossContinental,
+
+    senderCountry,
+
+    recipientCountry,
+
+    senderCurrency: getCurrencyForCountry(senderCountry),
+
+    recipientCurrency: getCurrencyForCountry(
+      recipientCountry
     ),
-    isCrossContinental: isCrossContinentalTransaction(
-      senderCountry,
-      recipientCountry,
-    ),
+
+    feeApplied: applyFee,
   };
 };
 
+// ============================================================
+// USER CURRENCY
+// ============================================================
+
 /**
- * Get the appropriate currency for a user based on their country
- * @param {Object} user - User object with country information
- * @returns {string} Currency code
- * @throws {Error} If currency cannot be determined
+ * Get currency for a user based on their country.
  */
 const getCurrencyForUser = (user) => {
   if (!user) {
-    throw new Error("Cannot determine currency: User data not provided");
+    throw new Error(
+      "Cannot determine currency: User data not provided"
+    );
   }
 
-  console.log("Determining currency for user with data:", {
-    countryCode: user.countryCode || "Not set",
-    country: user.country || "Not set",
-    continent: user.continent || "Not set",
-  });
+  const countryCode = normalizeCountryCode(
+    user.countryCode
+  );
 
-  // PRIORITY HANDLING: For United Kingdom users, immediately return GBP
-  if (user.country === "United Kingdom" || user.countryCode === "GB") {
-    console.log("UK DETECTED: Setting currency to GBP");
-    return "GBP";
-  }
+  if (countryCode) {
+    const currency = countryCurrencyMap[countryCode];
 
-  // First try to get currency from countryCode (2-letter code)
-  if (user.countryCode) {
-    const currencyFromCode = countryCurrencyMap[user.countryCode];
-    if (currencyFromCode) {
-      console.log(
-        `Determined currency ${currencyFromCode} from countryCode ${user.countryCode}`,
-      );
-      return currencyFromCode;
-    } else {
-      console.warn(
-        `CountryCode ${user.countryCode} did not map to a known currency`,
-      );
+    if (currency) {
+      return currency;
     }
   }
 
-  // If countryCode doesn't yield a valid currency, try using the country name
+  // Fallback for users where countryCode is unavailable.
   if (user.country) {
-    // Map full country names to their respective ISO codes
     const countryNameToCode = {
       "United Kingdom": "GB",
       "United States": "US",
@@ -353,31 +649,31 @@ const getCurrencyForUser = (user) => {
       Chile: "CL",
     };
 
-    const countryCode = countryNameToCode[user.country];
+    const countryCode =
+      countryNameToCode[user.country];
+
     if (countryCode) {
-      const currencyFromName = countryCurrencyMap[countryCode];
-      if (currencyFromName) {
-        console.log(
-          `Determined currency ${currencyFromName} from country name ${user.country} (code: ${countryCode})`,
-        );
-        return currencyFromName;
-      } else {
-        console.warn(
-          `Country name ${user.country} mapped to code ${countryCode}, but no currency found for this code`,
-        );
+      const currency =
+        countryCurrencyMap[countryCode];
+
+      if (currency) {
+        return currency;
       }
-    } else {
-      console.warn(
-        `Country name ${user.country} did not map to a known country code`,
-      );
     }
   }
 
-  // If we cannot determine the currency, throw an error
-  const errorMessage = `Cannot determine currency: User has invalid or missing country data. Country: ${user.country || "Not set"}, CountryCode: ${user.countryCode || "Not set"}`;
-  console.error(errorMessage);
-  throw new Error(errorMessage);
+  throw new Error(
+    `Cannot determine currency: User has invalid or missing country data. Country: ${
+      user.country || "Not set"
+    }, CountryCode: ${
+      user.countryCode || "Not set"
+    }`
+  );
 };
+
+// ============================================================
+// EXPORTS
+// ============================================================
 
 module.exports = {
   calculateTransactionFee,
@@ -387,4 +683,6 @@ module.exports = {
   isInternationalTransaction,
   isCrossContinentalTransaction,
   determinePaymentGateway,
+  getTransactionRate,
 };
+
