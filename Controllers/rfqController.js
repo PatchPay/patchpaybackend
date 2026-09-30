@@ -157,6 +157,7 @@ const createRFQ = async (req, res) => {
       product_quantity,
       amount,
       currency,
+
       delivery_code,
       delivery_type,
       trade_type,
@@ -224,33 +225,86 @@ const createRFQ = async (req, res) => {
       });
     }
 
-    // =========================
-    // Financial calculations
-    // =========================
-    const numericAmount = Number(amount);
-    const numericDelivery = Number(delivery_charge || 0);
+// =========================
+// Financial calculations
+// =========================
+const numericAmount = Number(amount);
+const numericDelivery = Number(delivery_charge || 0);
 
-    const lineTotal = numericAmount;
-    // Compute the transaction charge on the server from the active rate card.
-    const feeDetails = await calculateTransactionFee(
-      sender,
-      recipient,
-      numericAmount,
-    );
-    const numericTransaction = feeDetails.feeAmount;
-    const total = numericAmount + numericDelivery + numericTransaction;
+if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Amount must be a valid number greater than 0",
+  });
+}
 
-    let exchangeRate = 1;
+if (!Number.isFinite(numericDelivery) || numericDelivery < 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Delivery charge must be a valid number",
+  });
+}
 
-    // basic fallback FX logic (safe version)
-    if (senderCurrency !== selectedCurrency) {
-      exchangeRate = feeDetails.feePercentage / 100 + 1;
-    }
+// =========================
+// Payment provider
+// =========================
+const normalizedPaymentProvider = String(
+  paymentProvider || "squad"
+)
+  .trim()
+  .toLowerCase();
 
-    // optional: override for international logic if needed
-    if (isInternationalTransaction(sender.countryCode, recipient.countryCode)) {
-      exchangeRate = feeDetails.feePercentage / 100 + 1;
-    }
+if (!["squad", "stripe"].includes(normalizedPaymentProvider)) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid payment provider. Use squad or stripe",
+  });
+}
+
+// =========================
+// Calculate transaction fee
+// =========================
+// The utility automatically chooses:
+//
+// National + Squad
+//     -> rate_national_squad
+//
+// National + Stripe
+//     -> rate_national_stripe
+//
+// International + Squad
+//     -> rate_international_squad
+//
+// International + Stripe
+//     -> rate_international_stripe
+
+const feeDetails = await calculateTransactionFee(
+  sender,
+  recipient,
+  numericAmount,
+  normalizedPaymentProvider
+);
+
+const numericTransaction = Number(feeDetails.feeAmount || 0);
+
+const total =
+  numericAmount +
+  numericDelivery +
+  numericTransaction;
+
+// Transaction fee percentage is NOT an exchange rate.
+// Until actual FX conversion is implemented, keep this at 1.
+const exchangeRate = 1;
+
+    // // basic fallback FX logic (safe version)
+    // if (senderCurrency !== selectedCurrency) {
+    //   exchangeRate = feeDetails.feePercentage / 100 + 1;
+    // }
+
+    // // optional: override for international logic if needed
+    // if (isInternationalTransaction(sender.countryCode, recipient.countryCode)) {
+    //   exchangeRate = feeDetails.feePercentage / 100 + 1;
+    // }
 
     // =========================
     // Generate identifiers
@@ -288,7 +342,7 @@ const createRFQ = async (req, res) => {
   },
 
   delivery_code:deliveryCode,
-   
+  
   delivery_type,
   trade_type,
   delivery_address,
