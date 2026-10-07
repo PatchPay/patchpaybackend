@@ -158,6 +158,9 @@ const createRFQ = async (req, res) => {
       amount,
       currency,
 
+      // Payment provider
+      paymentProvider,
+
       delivery_code,
       delivery_type,
       trade_type,
@@ -170,9 +173,31 @@ const createRFQ = async (req, res) => {
     } = req.body;
 
     // =========================
+    // Validate payment provider
+    // =========================
+    if (!paymentProvider) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment provider is required. Use squad or stripe",
+      });
+    }
+
+    const normalizedPaymentProvider = String(paymentProvider)
+      .trim()
+      .toLowerCase();
+
+    if (!["squad", "stripe"].includes(normalizedPaymentProvider)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment provider. Use squad or stripe",
+      });
+    }
+
+    // =========================
     // Validate users first
     // =========================
     const recipient = await User.findByPk(recipientId);
+
     if (!recipient) {
       return res.status(404).json({
         success: false,
@@ -188,6 +213,7 @@ const createRFQ = async (req, res) => {
     }
 
     const sender = await User.findByPk(req.user.id);
+
     if (!sender) {
       return res.status(404).json({
         success: false,
@@ -195,20 +221,13 @@ const createRFQ = async (req, res) => {
       });
     }
 
-    // The authenticated user is always the seller/creator. No client-supplied
-    // creator field is used, and an RFQ cannot be sent to its own seller.
+    // The authenticated user is always the seller/creator.
     if (String(sender.id) === String(recipient.id)) {
       return res.status(400).json({
         success: false,
         message: "Seller and buyer must be different users",
       });
     }
-
-    // console.log("Sender User:", sender);
-    // console.log("Recipient User:", recipient);
-
-    // console.log("Sender surname:", sender?.surname);
-    // console.log("Recipient surname:", recipient?.surname);
 
     // =========================
     // Currency handling
@@ -225,198 +244,214 @@ const createRFQ = async (req, res) => {
       });
     }
 
-// =========================
-// Financial calculations
-// =========================
-const numericAmount = Number(amount);
-const numericDelivery = Number(delivery_charge || 0);
+    // =========================
+    // Financial calculations
+    // =========================
+    const numericAmount = Number(amount);
+    const numericDelivery = Number(delivery_charge || 0);
 
-if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-  return res.status(400).json({
-    success: false,
-    message: "Amount must be a valid number greater than 0",
-  });
-}
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be a valid number greater than 0",
+      });
+    }
 
-if (!Number.isFinite(numericDelivery) || numericDelivery < 0) {
-  return res.status(400).json({
-    success: false,
-    message: "Delivery charge must be a valid number",
-  });
-}
+    if (!Number.isFinite(numericDelivery) || numericDelivery < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery charge must be a valid number",
+      });
+    }
 
-// =========================
-// Payment provider
-// =========================
-const normalizedPaymentProvider = String(
-  paymentProvider || "squad"
-)
-  .trim()
-  .toLowerCase();
+    // =========================
+    // Calculate transaction fee
+    // =========================
+    /*
+      The utility automatically chooses:
 
-if (!["squad", "stripe"].includes(normalizedPaymentProvider)) {
-  return res.status(400).json({
-    success: false,
-    message: "Invalid payment provider. Use squad or stripe",
-  });
-}
+      National + Squad
+        -> rate_national_squad
 
-// =========================
-// Calculate transaction fee
-// =========================
-// The utility automatically chooses:
-//
-// National + Squad
-//     -> rate_national_squad
-//
-// National + Stripe
-//     -> rate_national_stripe
-//
-// International + Squad
-//     -> rate_international_squad
-//
-// International + Stripe
-//     -> rate_international_stripe
+      National + Stripe
+        -> rate_national_stripe
 
-const feeDetails = await calculateTransactionFee(
-  sender,
-  recipient,
-  numericAmount,
-  normalizedPaymentProvider
-);
+      International + Squad
+        -> rate_international_squad
 
-const numericTransaction = Number(feeDetails.feeAmount || 0);
+      International + Stripe
+        -> rate_international_stripe
+    */
 
-const total =
-  numericAmount +
-  numericDelivery +
-  numericTransaction;
+    const feeDetails = await calculateTransactionFee(
+      sender,
+      recipient,
+      numericAmount,
+      normalizedPaymentProvider
+    );
 
-// Transaction fee percentage is NOT an exchange rate.
-// Until actual FX conversion is implemented, keep this at 1.
-const exchangeRate = 1;
+    const numericTransaction = Number(
+      feeDetails.feeAmount || 0
+    );
 
-    // // basic fallback FX logic (safe version)
-    // if (senderCurrency !== selectedCurrency) {
-    //   exchangeRate = feeDetails.feePercentage / 100 + 1;
-    // }
+    // =========================
+    // Calculate total
+    // =========================
+    const total =
+      numericAmount +
+      numericDelivery +
+      numericTransaction;
 
-    // // optional: override for international logic if needed
-    // if (isInternationalTransaction(sender.countryCode, recipient.countryCode)) {
-    //   exchangeRate = feeDetails.feePercentage / 100 + 1;
-    // }
+    // Transaction fee percentage is NOT an exchange rate.
+    // Until actual FX conversion is implemented, keep this at 1.
+    const exchangeRate = 1;
 
     // =========================
     // Generate identifiers
     // =========================
-    const quoteNumber = crypto.randomBytes(4).toString("hex").toUpperCase();
-    const uprn = crypto.randomBytes(6).toString("hex").toUpperCase();
+    const quoteNumber = crypto
+      .randomBytes(4)
+      .toString("hex")
+      .toUpperCase();
+
+    const uprn = crypto
+      .randomBytes(6)
+      .toString("hex")
+      .toUpperCase();
+
     const deliveryCode = generateDeliveryCode();
 
     // =========================
     // Create RFQ
     // =========================
-  const rfq = await Quote.create({
-  quote_number: quoteNumber,
-  type: "RFQ",
-  product_description,
-  product_quantity,
-  amount: numericAmount,
-  currency: selectedCurrency,
-  total,
-  uprn,
-  status: "Pending",
+    const rfq = await Quote.create({
+      quote_number: quoteNumber,
+      type: "RFQ",
 
-  user_data: {
-    id: sender.id,
-    firstName: sender.firstName,
-    surname: sender.surname,
-    phoneNumber: sender.phoneNumber,
-  },
+      product_description,
+      product_quantity,
 
-  destinatary_user: {
-    id: recipient.id,
-    firstName: recipient.firstName,
-    surname: recipient.surname,
-    phoneNumber: recipient.phoneNumber,
-  },
+      amount: numericAmount,
+      currency: selectedCurrency,
+      total,
 
-  delivery_code:deliveryCode,
-  
-  delivery_type,
-  trade_type,
-  delivery_address,
-  arrival_date,
-  arrival_time,
-  line_total: numericAmount,
-  delivery_charge: numericDelivery,
-  transaction_charges: numericTransaction,
-  transaction_fee_percentage: feeDetails.feePercentage,
-  rate_id: feeDetails.rateId,
-  rate_snapshot: feeDetails.rateSnapshot,
-  subtotal: numericAmount + numericDelivery,
- proof_delivery: Math.floor(Date.now() / 1000),
-  coupon: [],
-  exchange_rate: exchangeRate,
-  responseNotificationDue: new Date(Date.now() + 72 * 60 * 60 * 1000),
-  notificationSent: false,
-});
+      uprn,
+      status: "Pending",
 
+      // =========================
+      // Payment provider
+      // =========================
+      payment_provider: normalizedPaymentProvider,
 
+      user_data: {
+        id: sender.id,
+        firstName: sender.firstName,
+        surname: sender.surname,
+        phoneNumber: sender.phoneNumber,
+      },
 
-    
+      destinatary_user: {
+        id: recipient.id,
+        firstName: recipient.firstName,
+        surname: recipient.surname,
+        phoneNumber: recipient.phoneNumber,
+      },
+
+      delivery_code: deliveryCode,
+
+      delivery_type,
+      trade_type,
+      delivery_address,
+
+      arrival_date,
+      arrival_time,
+
+      line_total: numericAmount,
+      delivery_charge: numericDelivery,
+      transaction_charges: numericTransaction,
+
+      transaction_fee_percentage: feeDetails.feePercentage,
+      rate_id: feeDetails.rateId,
+      rate_snapshot: feeDetails.rateSnapshot,
+
+      subtotal: numericAmount + numericDelivery,
+
+      proof_delivery: Math.floor(Date.now() / 1000),
+
+      coupon: [],
+
+      exchange_rate: exchangeRate,
+
+      responseNotificationDue: new Date(
+        Date.now() + 72 * 60 * 60 * 1000
+      ),
+
+      notificationSent: false,
+    });
 
     // =========================
-    // Notifications
+    // Notification - Sender
     // =========================
     await Notification.create({
       recipientId: sender.id,
       senderId: sender.id,
+
       title: "RFQ Created",
+
       message: `You have created RFQ #${quoteNumber} for ${product_description}`,
+
       type: "success",
       category: "system",
+
       metadata: {
         quoteId: rfq.id,
         quoteNumber,
         amount: numericAmount,
         currency: selectedCurrency,
+        paymentProvider: normalizedPaymentProvider,
         recipientName: `${recipient.firstName} ${recipient.surname}`,
       },
-    })
+    });
 
+    // =========================
+    // Notification - Recipient
+    // =========================
     await Notification.create({
       recipientId: recipientId,
       senderId: sender.id,
+
       title: "New RFQ Received",
+
       message: `You have received RFQ #${quoteNumber} from ${sender.firstName} ${sender.surname}`,
+
       type: "info",
       category: "system",
+
       metadata: {
         quoteId: rfq.id,
         quoteNumber,
         amount: numericAmount,
         currency: selectedCurrency,
+        paymentProvider: normalizedPaymentProvider,
         senderName: `${sender.firstName} ${sender.surname}`,
       },
-    })
+    });
 
-// =========================
-// Email Notification
-// =========================
-if (recipient.email) {
-  sendRFQNotificationEmail(
-    recipient,
-    sender,
-    rfq
-  ).catch((error) => {
-    console.error(
-      "❌ Failed to send RFQ email notification:",
-      error
-    );
-  });
-}
-
+    // =========================
+    // Email Notification
+    // =========================
+    if (recipient.email) {
+      sendRFQNotificationEmail(
+        recipient,
+        sender,
+        rfq
+      ).catch((error) => {
+        console.error(
+          "❌ Failed to send RFQ email notification:",
+          error
+        );
+      });
+    }
 
     // =========================
     // Response
@@ -427,12 +462,14 @@ if (recipient.email) {
     });
   } catch (error) {
     console.error("Error in createRFQ:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Error creating RFQ",
     });
   }
 };
+
 // Send invitation to non-registered user
 const sendInvitation = async (req, res) => {
   try {
