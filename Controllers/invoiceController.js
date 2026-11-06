@@ -6,11 +6,13 @@ const {
   Quote,
   Transaction,
   User,
+  Wallet,
 } = require("../models");
 
-const squadService = require("../services/squad.service");
 const { generateUPRN } = require("../utils/paymentUtils");
 const { createNotification } = require("../services/notificationService");
+
+const bcrypt = require("bcrypt");
 
 
 // ============================================================
@@ -290,124 +292,495 @@ exports.createInvoiceFromAcceptedQuote = async (req, res) => {
 // INITIATE INVOICE PAYMENT
 // ============================================================
 
+
 exports.initiateInvoicePayment = async (req, res) => {
+  const transactionDb = await sequelize.transaction();
+
   try {
     const { invoiceId } = req.params;
+    const buyerId = Number(req.user.id);
+    // SECURITY: Require transaction PIN before processing payment
+const { transactionPin } = req.body || {};
 
-    const invoice = await Invoice.findByPk(invoiceId);
+// Validate PIN format
+if (
+  !transactionPin ||
+  !/^\d{4}$/.test(String(transactionPin))
+) {
+  await transactionDb.rollback();
+
+  return res.status(400).json({
+    success: false,
+    code: "INVALID_PIN_FORMAT",
+    message: "Please enter your valid 4-digit transaction PIN.",
+  });
+}
+
+// Get buyer account
+const buyer = await User.findByPk(buyerId, {
+  transaction: transactionDb,
+  lock: transactionDb.LOCK.UPDATE,
+});
+
+if (!buyer) {
+  await transactionDb.rollback();
+
+  return res.status(404).json({
+    success: false,
+    message: "User account not found.",
+  });
+}
+
+// Check whether the buyer has created a transaction PIN
+if (!buyer.hasTransactionPin || !buyer.transactionPinHash) {
+  await transactionDb.rollback();
+
+  return res.status(403).json({
+    success: false,
+    code: "TRANSACTION_PIN_NOT_SET",
+    message: "You need to set up your transaction PIN before making payments.",
+  });
+}
+
+// Compare the entered PIN with the stored bcrypt hash
+const isPinValid = await bcrypt.compare(
+  String(transactionPin),
+  buyer.transactionPinHash
+);
+
+if (!isPinValid) {
+  await transactionDb.rollback();
+
+  return res.status(401).json({
+    success: false,
+    code: "INCORRECT_TRANSACTION_PIN",
+    message: "Incorrect transaction PIN. Please try again.",
+  });
+}
+
+    // 1. Lock invoice to prevent concurrent payments
+    const invoice = await Invoice.findByPk(invoiceId, {
+      transaction: transactionDb,
+      lock: transactionDb.LOCK.UPDATE,
+    });
 
     if (!invoice) {
+      await transactionDb.rollback();
+
       return res.status(404).json({
         success: false,
         message: "Invoice not found",
       });
     }
 
-    // Only buyer can pay
-    if (
-      invoice.recipientId.toString() !==
-      req.user.id.toString()
-    ) {
+    // 2. Only the buyer can pay
+    if (String(invoice.recipientId) !== String(buyerId)) {
+      await transactionDb.rollback();
+
       return res.status(403).json({
         success: false,
         message: "Only the buyer can pay this invoice",
       });
     }
 
+    // 3. Prevent duplicate payment
     if (invoice.paymentStatus === "paid") {
+      await transactionDb.rollback();
+
       return res.status(400).json({
         success: false,
         message: "Invoice has already been paid",
       });
     }
 
-    const buyer = await User.findByPk(invoice.recipientId);
+    if (invoice.paymentStatus === "failed") {
+      // Failed is not a permanent state for internal wallet payments.
+      // A new attempt is allowed.
+    }
 
-    if (!buyer) {
-      return res.status(404).json({
+    if (!["pending", "unpaid", "failed"].includes(invoice.paymentStatus)) {
+      await transactionDb.rollback();
+
+      return res.status(400).json({
         success: false,
-        message: "Invoice buyer not found",
+        message: "Invoice cannot be paid in its current state",
       });
     }
 
-    const paymentReference =
-      invoice.paymentReference ||
-      `INV-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-    const callbackUrl = `${
-      process.env.FRONTEND_URL || "http://localhost:8081"
-    }/api/invoices/callback`;
-
-    const payment = await squadService.initiateCollection({
-      amount: invoice.amount,
-      email: buyer.email,
-      currency: invoice.currency,
-      transactionRef: paymentReference,
-      callbackUrl,
-
-      metadata: {
-        invoiceId: invoice.id.toString(),
-        rfqId: invoice.rfqId.toString(),
-        paymentType: "invoice",
-      },
+    // 4. Lock buyer wallet
+    const buyerWallet = await Wallet.findOne({
+      where: { userId: buyerId },
+      transaction: transactionDb,
+      lock: transactionDb.LOCK.UPDATE,
     });
+
+    if (!buyerWallet) {
+      await transactionDb.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found. Please initialize your wallet.",
+      });
+    }
+
+    if (!buyerWallet.isActive) {
+      await transactionDb.rollback();
+
+      return res.status(403).json({
+        success: false,
+        message: "Your wallet is currently inactive",
+      });
+    }
+
+    // 5. Check currency
+    if (
+      String(buyerWallet.currency).toUpperCase() !==
+      String(invoice.currency).toUpperCase()
+    ) {
+      await transactionDb.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Wallet currency does not match invoice currency",
+        data: {
+          walletCurrency: buyerWallet.currency,
+          invoiceCurrency: invoice.currency,
+        },
+      });
+    }
+
+    // 6. Validate payment amount using minor units
+    const invoiceAmount = Number(invoice.amount);
+    const walletBalance = Number(buyerWallet.balance);
+
+    const amountInKobo = Math.round(invoiceAmount * 100);
+    const balanceInKobo = Math.round(walletBalance * 100);
+
+    if (
+      !Number.isFinite(invoiceAmount) ||
+      invoiceAmount <= 0 ||
+      !Number.isFinite(walletBalance)
+    ) {
+      await transactionDb.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice amount or wallet balance",
+      });
+    }
+
+    // 7. Insufficient balance
+    if (balanceInKobo < amountInKobo) {
+      await transactionDb.rollback();
+
+      return res.status(400).json({
+        success: false,
+        code: "INSUFFICIENT_BALANCE",
+        message: "Insufficient wallet balance. Please fund your wallet.",
+        data: {
+          requiredAmount: invoiceAmount,
+          availableBalance: walletBalance,
+          shortfall: Number(
+            ((amountInKobo - balanceInKobo) / 100).toFixed(2)
+          ),
+          currency: invoice.currency,
+        },
+      });
+    }
+
+    // 8. Get RFQ
+    const quote = await Quote.findByPk(invoice.rfqId, {
+      transaction: transactionDb,
+    });
+
+    if (!quote) {
+      throw new Error("RFQ not found for invoice");
+    }
+
+    // 9. Check existing escrow
+    const existingEscrow = await Escrow.findOne({
+      where: sequelize.where(
+        sequelize.json("metadata.invoiceid"),
+        invoice.id.toString()
+      ),
+      transaction: transactionDb,
+    });
+
+    if (existingEscrow) {
+      throw new Error(
+        "An escrow already exists for this unpaid invoice. Please contact support."
+      );
+    }
+
+    // 10. Generate references
+    const paymentReference = generateUPRN(
+      buyerId,
+      "invoice_payment"
+    );
+
+    const escrowReference = `${paymentReference}-ESC`;
+
+    // 11. Deduct money from buyer wallet
+    buyerWallet.balance = (
+      (balanceInKobo - amountInKobo) / 100
+    ).toFixed(2);
+
+    await buyerWallet.save({
+      transaction: transactionDb,
+    });
+
+    // 12. Create invoice payment transaction
+    const invoiceTransaction = await Transaction.create(
+      {
+        type: "invoice_payment",
+        amount: invoiceAmount,
+        total: invoiceAmount,
+        fee: 0,
+        currency: invoice.currency,
+        status: "success",
+
+        senderId: buyerId,
+        senderWallet: buyerWallet.id,
+
+        recipientId: invoice.requesterId,
+        recipientWallet: null,
+
+        reference: paymentReference,
+
+        description: `Wallet payment for invoice ${
+          invoice.invoice_number || `#${invoice.id}`
+        }`,
+
+        isUserAccountTransfer: false,
+
+        paymentMethod: "wallet",
+        paymentGateway: "Internal",
+
+        verificationStatus: "not_required",
+
+        metadata: {
+          invoiceId: invoice.id,
+          rfqId: quote.id,
+          quoteNumber: quote.quote_number,
+          paymentType: "invoice",
+          walletId: buyerWallet.id,
+        },
+      },
+      { transaction: transactionDb }
+    );
+
+    // 13. Create escrow funding transaction
+    const escrowFundingTransaction = await Transaction.create(
+      {
+        type: "escrow_funding",
+        amount: invoiceAmount,
+        total: invoiceAmount,
+        fee: 0,
+        currency: invoice.currency,
+        status: "success",
+
+        senderId: buyerId,
+        senderWallet: buyerWallet.id,
+
+        recipientId: invoice.requesterId,
+        recipientWallet: null,
+
+        reference: escrowReference,
+
+        description: `Escrow funding for invoice ${
+          invoice.invoice_number || `#${invoice.id}`
+        }`,
+
+        isUserAccountTransfer: false,
+
+        paymentMethod: "wallet",
+        paymentGateway: "Internal",
+
+        verificationStatus: "not_required",
+
+        metadata: {
+          invoiceId: invoice.id,
+          rfqId: quote.id,
+          paymentReference,
+          isInternalEscrowOperation: true,
+        },
+      },
+      { transaction: transactionDb }
+    );
+
+    // 14. Generate escrow UPRN
+    const escrowUprn = generateUPRN(
+      invoice.requesterId,
+      "escrow_release"
+    );
+
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 30);
+
+    // 15. Create funded escrow
+    const escrow = await Escrow.create(
+      {
+        creatorId: invoice.requesterId,
+        recipientId: invoice.recipientId,
+
+        amount: invoiceAmount,
+        currentBalance: invoiceAmount,
+        currency: invoice.currency,
+
+        status: "FUNDED",
+
+        escrowUprn,
+
+        fundingTransactionId: escrowFundingTransaction.id,
+
+        conditions: `Escrow for RFQ #${quote.quote_number}`,
+
+        description: invoice.description,
+
+        expiryDate,
+
+        metadata: {
+          quoteid: quote.id.toString(),
+          quote_number: quote.quote_number,
+          invoiceid: invoice.id.toString(),
+          paymentReference,
+          funded: true,
+          paymentMethod: "wallet",
+        },
+      },
+      { transaction: transactionDb }
+    );
+
+    // 16. Update invoice
+    invoice.status = "paid";
+    invoice.paymentStatus = "paid";
 
     invoice.paymentReference = paymentReference;
-    invoice.checkoutUrl = payment.checkoutUrl;
-    invoice.paymentStatus = "pending";
-    invoice.gatewayResponse = payment.raw;
 
-    await invoice.save();
+    invoice.paidAt = new Date();
+    invoice.verifiedAt = new Date();
 
-    // ============================================================
-    // 🔔 NOTIFICATION: PAYMENT INITIATED
-    // ============================================================
+    invoice.fundingTransactionId = invoiceTransaction.id;
 
-    await createNotification({
-      recipientId: invoice.requesterId,
-      senderId: invoice.recipientId,
+    invoice.escrowFundingTransactionId =
+      escrowFundingTransaction.id;
 
-      title: "Invoice Payment Initiated",
+    invoice.escrowId = escrow.id;
 
-      message: `Payment has been initiated for invoice ${
-        invoice.invoice_number || `#${invoice.id}`
-      }. Please wait for payment verification.`,
+    await invoice.save({
+      transaction: transactionDb,
+    });
 
-      type: "info",
-      category: "invoice",
+    // 17. Commit all database changes
+    await transactionDb.commit();
 
-      metadata: {
-        event: "invoice_payment_initiated",
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoice_number,
-        paymentReference,
-        amount: invoice.amount,
-        currency: invoice.currency,
+    // 18. Notify seller and buyer AFTER successful commit
+    const notify = async (payload) => {
+      try {
+        await createNotification(payload);
+      } catch (notificationError) {
+        console.error(
+          "Invoice notification failed:",
+          notificationError
+        );
+      }
+    };
+
+    await Promise.all([
+      notify({
+        recipientId: invoice.requesterId,
+        senderId: buyerId,
+        title: "Invoice Paid",
+        message: `Invoice ${
+          invoice.invoice_number || `#${invoice.id}`
+        } has been paid successfully. The funds are now secured in escrow.`,
+        type: "success",
+        category: "invoice",
+        metadata: {
+          event: "invoice_paid",
+          invoiceId: invoice.id,
+          escrowId: escrow.id,
+          amount: invoiceAmount,
+          currency: invoice.currency,
+          paymentReference,
+        },
+      }),
+
+      notify({
+        recipientId: buyerId,
+        senderId: invoice.requesterId,
+        title: "Payment Successful",
+        message: `You have successfully paid ${
+          invoiceAmount
+        } ${invoice.currency} from your wallet. Your funds are now protected in escrow.`,
+        type: "success",
+        category: "invoice",
+        metadata: {
+          event: "invoice_payment_success",
+          invoiceId: invoice.id,
+          escrowId: escrow.id,
+          amount: invoiceAmount,
+          currency: invoice.currency,
+          paymentReference,
+        },
+      }),
+
+      notify({
+        recipientId: invoice.requesterId,
+        senderId: buyerId,
+        title: "Escrow Funded",
+        message: `Your escrow of ${invoiceAmount} ${invoice.currency} has been funded.`,
+        type: "success",
+        category: "escrow",
+        metadata: {
+          event: "escrow_funded",
+          escrowId: escrow.id,
+          escrowUprn: escrow.escrowUprn,
+          invoiceId: invoice.id,
+          amount: invoiceAmount,
+          currency: invoice.currency,
+          status: escrow.status,
+        },
+      }),
+    ]);
+
+    // 19. Return success
+    return res.status(200).json({
+      success: true,
+      message: "Invoice paid successfully. Funds secured in escrow.",
+
+      data: {
+        invoice,
+        escrow,
+
+        wallet: {
+          previousBalance: walletBalance,
+          amountDeducted: invoiceAmount,
+          currentBalance: Number(buyerWallet.balance),
+          currency: buyerWallet.currency,
+        },
+
+        transactions: {
+          invoicePayment: invoiceTransaction,
+          escrowFunding: escrowFundingTransaction,
+        },
       },
     });
 
-    return res.status(200).json({
-      success: true,
-      paymentUrl: payment.checkoutUrl,
-      reference: paymentReference,
-    });
   } catch (error) {
-    console.error(
-      "Invoice payment initiation error:",
-      error
-    );
+    if (!transactionDb.finished) {
+      await transactionDb.rollback();
+    }
+
+    console.error("Wallet invoice payment error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
-      message:
-        error.message ||
-        "Failed to initiate invoice payment",
-      error:
-        error.providerResponse ||
-        error.message,
+      message: error.message || "Failed to process invoice payment",
     });
   }
 };
+
 
 // ============================================================
 // HANDLE INVOICE CALLBACK
