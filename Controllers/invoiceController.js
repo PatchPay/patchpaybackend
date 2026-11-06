@@ -12,7 +12,7 @@ const {
 const { generateUPRN } = require("../utils/paymentUtils");
 const { createNotification } = require("../services/notificationService");
 
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 
 // ============================================================
