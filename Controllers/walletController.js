@@ -465,9 +465,9 @@ exports.getWalletDetails = async (req, res) => {
       data: {
         accountNumber: wallet.accountNumber,
         balance: Number(wallet.balance),
-        rawBalance: Number(wallet.balance),
-        availableBalance: Number(availableBalance),
-        rawAvailableBalance: Number(availableBalance),
+        // rawBalance: Number(wallet.balance),
+        // availableBalance: Number(availableBalance),
+        // rawAvailableBalance: Number(availableBalance),
         currency: wallet.currency,
         isActive: wallet.isActive,
         createdAt: wallet.createdAt,
