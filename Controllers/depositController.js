@@ -1,9 +1,47 @@
 
 const DepositPayment = require("../models/DepositPayment");
 const Transaction = require("../models/Transaction");
-const Wallet = require("../models/Wallet");
+const sequelize = require("../config/database");
+const { creditAccountBalance, decimalAmount } = require("../services/accountBalance.service");
 const axios = require("axios");
 const crypto = require("crypto");
+
+async function creditSuccessfulDeposit(paymentId, gatewayData = {}) {
+  return sequelize.transaction(async (t) => {
+    const payment = await DepositPayment.findByPk(paymentId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!payment) throw new Error("Deposit payment not found");
+    if (payment.status === "successful" || payment.transactionId) {
+      return { payment, transaction: payment.transactionId ? await Transaction.findByPk(payment.transactionId, { transaction: t }) : null, alreadyProcessed: true };
+    }
+
+    const providerData = gatewayData.data || gatewayData;
+    const squadRef = providerData.transactionid || providerData.transaction_ref || payment.squadRef || null;
+    const transaction = await Transaction.create({
+      type: "deposit",
+      amount: payment.amount,
+      fee: "0.00",
+      total: payment.amount,
+      currency: payment.currency,
+      status: "completed",
+      recipientId: payment.userId,
+      reference: payment.transactionRef,
+      idempotencyKey: payment.transactionRef,
+      description: "Deposit via Squad payment gateway to account balance",
+      externalReference: squadRef,
+      isUserAccountTransfer: false,
+      metadata: { balanceTarget: "account", accountBalanceCurrency: payment.currency },
+    }, { transaction: t });
+
+    await creditAccountBalance({ userId: payment.userId, currency: payment.currency, amount: payment.amount, transaction: t });
+    payment.status = "successful";
+    payment.squadRef = squadRef;
+    payment.gatewayResponse = gatewayData;
+    payment.gatewayResponseCode = providerData.response_code || payment.gatewayResponseCode;
+    payment.transactionId = transaction.id;
+    await payment.save({ transaction: t });
+    return { payment, transaction, alreadyProcessed: false };
+  });
+}
 
 /**
  * Initiate a deposit payment
@@ -14,9 +52,8 @@ exports.initiateDeposit = async (req, res) => {
     // Get user from middleware
     const user = req.user;
     // Get amount from request body
-    const { amount } = req.body;
-
-    if (!amount || isNaN(amount) || amount <= 0) {
+    let amount;
+    try { amount = decimalAmount(req.body.amount); } catch {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid amount",
@@ -44,10 +81,7 @@ exports.initiateDeposit = async (req, res) => {
 
     console.log("FINAL URL:", `${squadApiUrl}/transaction/initiate`);
 
-    console.log("SQUAD SECRET KEY:", squadSecretKey);
     console.log("SQUAD API URL:", squadApiUrl);
-
-    console.log("KEY BEING SENT:", squadSecretKey);
 
     if (!squadSecretKey) {
       return res.status(500).json({
@@ -182,7 +216,7 @@ exports.handleWebhook = async (req, res) => {
       return res.status(200).json({ success: true, message: "Event ignored" });
     }
 
-    const { transaction_ref, amount, customer, currency } = event.data;
+    const { transaction_ref } = event.data;
 
     // Find the payment
     const payment = await DepositPayment.findOne({ 
@@ -200,55 +234,11 @@ exports.handleWebhook = async (req, res) => {
         .json({ success: false, message: "Payment not found" });
     }
 
-    // If payment is already processed, ignore
-    if (payment.status === "successful") {
-      return res
-        .status(200)
-        .json({ success: true, message: "Payment already processed" });
-    }
-
-    // Update payment status
-    payment.status = "successful";
-    payment.squadRef = event.data.transactionid || "";
-    payment.gatewayResponse = event.data;
-    payment.gatewayResponseCode = event.data.response_code || "";
-
-    // Find user's wallet
-    const wallet = await Wallet.findOne({where:{ userId: payment.userId }});
-
-    if (!wallet) {
-      payment.errorMessage = "User wallet not found";
-      await payment.save();
-      return res
-        .status(404)
-        .json({ success: false, message: "Wallet not found" });
-    }
-
-    // Create transaction
-    const transaction = new Transaction({
-      type: "deposit",
-      amount: payment.amount,
-      currency: payment.currency,
-      status: "completed",
-      recipientWallet: wallet.id,
-      recipientId: payment.userId,
-      reference: payment.transactionRef,
-      description: "Deposit via Squad payment gateway",
-      externalReference: payment.squadRef,
-    });
-
-    await transaction.save();
-
-    // Add amount to wallet
-    wallet.balance += payment.amount;
-    await wallet.save();
-
-    // Update payment with transaction ID
-    payment.transactionId = transaction.id;
-    await payment.save();
+    const result = await creditSuccessfulDeposit(payment.id, event.data);
+    if (result.alreadyProcessed) return res.status(200).json({ success: true, message: "Payment already processed" });
 
     console.log(
-      `Deposit successful: ${payment.amount} ${payment.currency} for user ${payment.userId}`,
+      `Deposit successful: ${payment.amount} ${payment.currency} to account balance for user ${payment.userId}`,
     );
 
     return res.status(200).json({
@@ -328,7 +318,7 @@ exports.handleCallback = async (req, res) => {
           const resultEl = document.getElementById("result");
 
           if (data.success) {
-            resultEl.innerHTML = "✅ Payment Successful! Wallet Credited";
+            resultEl.innerHTML = "✅ Payment Successful! Account Balance Credited";
           } else {
             resultEl.innerHTML = "❌ Payment Failed: " + data.message;
           }
@@ -427,68 +417,8 @@ exports.verifyDeposit = async (req, res) => {
         response.data.status === 200 &&
         response.data.data.transaction_status === "success"
       ) {
-        // Payment was successful
-        payment.status = "successful";
-        payment.squadRef = response.data.data.transaction_ref || "";
-
-        // Find user's wallet
-        const wallet = await Wallet.findOne(
-          {
-            where: 
-            { userId: payment.userId }
-          }
-        );
-
-        if (!wallet) {
-          payment.errorMessage = "User wallet not found";
-          await payment.save();
-
-          return res.status(404).json({
-            success: false,
-            message: "Wallet not found",
-          });
-        }
-
-        // Check if transaction already exists
-        let transaction = await Transaction.findOne(
-          {
-            where:  {
-          reference: payment.transactionRef,
-        }
-          }
-         
-      );
-
-        if (!transaction) {
-          // Create transaction
-         transaction = await Transaction.create({
-  type: "deposit",
-  amount: payment.amount,
-  currency: payment.currency,
-  status: "completed",
-  recipientWallet: wallet.id,
-  recipientId: payment.userId,
-
-  reference: payment.transactionRef,
-  idempotencyKey: payment.transactionRef,
-
-  description: "Deposit via Squad payment gateway",
-  externalReference: payment.squadRef,
-});
-
-        
-
-          // Add amount to wallet
-        wallet.balance =
-  parseFloat(wallet.balance) + parseFloat(payment.amount);
-
-await wallet.save();
-        
-        }
-
-        // Update payment with transaction ID
-        payment.transactionId = transaction.id;
-        await payment.save();
+        const processed = await creditSuccessfulDeposit(payment.id, response.data);
+        const transaction = processed.transaction;
 
         return res.status(200).json({
           success: true,

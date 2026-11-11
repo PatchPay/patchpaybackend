@@ -5,6 +5,8 @@ const crypto = require("crypto");
 const { Op } = require("sequelize");
 const emailService = require("../services/emailService");
 const Wallet = require("../models/Wallet");
+const AccountBalance = require("../models/AccountBalance");
+const sequelize = require("../config/database");
 const { generateAccountNumber } = require("../utils/accountUtils");
 
 
@@ -120,7 +122,11 @@ const registerUser = async (req, res) => {
     });
 
     // Save user
-  const newUser = await User.create(userData);
+  const newUser = await sequelize.transaction(async (transaction) => {
+    const createdUser = await User.create(userData, { transaction });
+    await AccountBalance.create({ userId: createdUser.id, currency: "NGN", balance: "0.00" }, { transaction });
+    return createdUser;
+  });
 
     // 🔥 Send OTP (DO NOT BLOCK USER CREATION)
     sendOTPEmail(email, otp).catch((err) => {
@@ -260,6 +266,10 @@ const loginUser = async (req, res) => {
         currency,
         isActive: true,
       });
+      await AccountBalance.findOrCreate({
+        where: { userId: user.id, currency },
+        defaults: { userId: user.id, currency, balance: "0.00" },
+      });
 
       console.log(
         `💰 Wallet created for user ${user.id} with account number: ${accountNumber} and currency: ${currency}`,
@@ -379,6 +389,12 @@ const verifyEmail = async (req, res) => {
         currency,
         isActive: true,
       });
+      if (currency) {
+        await AccountBalance.findOrCreate({
+          where: { userId: user.id, currency },
+          defaults: { userId: user.id, currency, balance: "0.00" },
+        });
+      }
 
       console.log(
         `💰 Wallet created successfully with account number: ${accountNumber} and currency: ${currency}`,

@@ -9,6 +9,7 @@ const User = require("../models/User");
 // const bankService = require("./bankService");
 const squadService = require("./squad.service");
 const walletService = require("./wallet.service");
+const accountBalanceService = require("./accountBalance.service");
 const { calculateTransactionFee } = require("../utils/transactionFeeUtils");
 const { generateUPRN, validateNameMatch } = require("../utils/paymentUtils");
 
@@ -336,6 +337,7 @@ const finalizePayout = async ({ withdrawal, transaction: transactionRecord, payo
   try {
     withdrawal = await WithdrawalPayment.findByPk(withdrawal.id, {
       transaction: t,
+      lock: t.LOCK.UPDATE,
     });
 
     if (!withdrawal) {
@@ -345,6 +347,7 @@ const finalizePayout = async ({ withdrawal, transaction: transactionRecord, payo
     if (transactionRecord) {
       transactionRecord = await Transaction.findByPk(transactionRecord.id, {
         transaction: t,
+        lock: t.LOCK.UPDATE,
       });
 
       if (!transactionRecord) {
@@ -390,11 +393,20 @@ const finalizePayout = async ({ withdrawal, transaction: transactionRecord, payo
       ["failed", "reversed"].includes(status) &&
       !withdrawal.refunded
     ) {
-      await walletService.creditWallet({
-        walletId: transactionRecord.senderWallet,
-        amount: transactionRecord.total,
-        transaction: t,
-      });
+      if (transactionRecord.metadata?.balanceSource === "account") {
+        await accountBalanceService.creditAccountBalance({
+          userId: transactionRecord.senderId,
+          currency: transactionRecord.currency,
+          amount: transactionRecord.total,
+          transaction: t,
+        });
+      } else {
+        await walletService.creditWallet({
+          walletId: transactionRecord.senderWallet,
+          amount: transactionRecord.total,
+          transaction: t,
+        });
+      }
 
       withdrawal.refunded = true;
       transactionRecord.status = "reversed";
@@ -465,8 +477,9 @@ const externalBankTransfer = async ({
   flowType = "external_bank_transfer",
 }) => {
   const stableKey = requireIdempotencyKey(idempotencyKey);
-  amount = Number(amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
+  try {
+    amount = accountBalanceService.decimalAmount(amount);
+  } catch {
     const error = new Error("amount must be greater than 0");
     error.statusCode = 400;
     throw error;
@@ -480,6 +493,16 @@ const externalBankTransfer = async ({
     },
   });
   if (existing) {
+    if (
+      String(existing.userId) !== String(user.id) ||
+      Number(existing.amount).toFixed(2) !== amount ||
+      existing.bankCode !== bankCode ||
+      existing.accountNumber !== accountNumber
+    ) {
+      const error = new Error("Idempotency key has already been used");
+      error.statusCode = 409;
+      throw error;
+    }
     const existingTransaction = await Transaction.findOne({
       where: {
         "metadata.transactionRef": existing.transactionRef,
@@ -501,20 +524,7 @@ const externalBankTransfer = async ({
   let transactionRecord;
 
   try {
-    const wallet = await walletService.getActiveWalletForUser(user.id, t);
-    if (!wallet) {
-      const error = new Error("Wallet not found");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    if (wallet.currency !== "NGN") {
-      const error = new Error(
-        "External bank transfers are only supported in NGN",
-      );
-      error.statusCode = 400;
-      throw error;
-    }
+    await accountBalanceService.findOrCreateLocked({ userId: user.id, currency: "NGN", transaction: t });
 
     const transactionRef = createPayoutReference();
 
@@ -545,7 +555,7 @@ const externalBankTransfer = async ({
     transactionRecord = await Transaction.create(
       {
         senderId: user.id,
-        senderWallet: wallet.id,
+        senderWallet: null,
         amount,
         fee: 0,
         total: amount,
@@ -562,6 +572,7 @@ const externalBankTransfer = async ({
         metadata: {
           transactionRef,
           flowType,
+          balanceSource: "account",
           withdrawalDetails: {
             accountName: lookup.accountName,
             accountNumber,
@@ -575,13 +586,14 @@ const externalBankTransfer = async ({
     addAudit(
       transactionRecord,
       "pending",
-      "Wallet debit reserved for external transfer",
+      "Account balance debit reserved for external transfer",
     );
 
     await withdrawal.save({ transaction: t });
     await transactionRecord.save({ transaction: t });
-    await walletService.debitWallet({
-      walletId: wallet.id,
+    await accountBalanceService.debitAccountBalance({
+      userId: user.id,
+      currency: "NGN",
       amount,
       transaction: t,
     });
@@ -616,7 +628,7 @@ const externalBankTransfer = async ({
       accountNumber,
       accountName: lookup.accountName,
       transactionRef: withdrawal.transactionRef,
-      description: description || "Wallet withdrawal",
+      description: description || "Account balance withdrawal",
     });
 
     const finalized = await finalizePayout({

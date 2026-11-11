@@ -18,7 +18,10 @@ const Transaction = sequelize.define(
         "withdrawal",
         "invoice_payment",
         "escrow_funding",
-        "escrow_release"
+        "escrow_release",
+        "escrow_refund",
+        "account_to_wallet",
+        "wallet_to_account"
       ),
       allowNull: false,
     },
