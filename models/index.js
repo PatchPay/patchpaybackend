@@ -9,6 +9,7 @@ const models = {
   // =========================
   User: require("./User"),
   Wallet: require("./Wallet"),
+  AccountBalance: require("./AccountBalance"),
   Transaction: require("./Transaction"),
 
   DepositPayment: require("./DepositPayment"),

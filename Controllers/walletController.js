@@ -25,6 +25,52 @@ const {
   getCurrencyForUser,
 } = require("../utils/transactionFeeUtils");
 const transferService = require("../services/transfer.service");
+const AccountBalance = require("../models/AccountBalance");
+const balanceTransferService = require("../services/balanceTransfer.service");
+
+exports.getBalances = async (req, res) => {
+  try {
+    const wallet = await Wallet.findOne({ where: { userId: req.user.id, isActive: true }, order: [["id", "ASC"]] });
+    const currencies = [...new Set(["NGN", wallet?.currency].filter(Boolean))];
+    for (const currency of currencies) {
+      await AccountBalance.findOrCreate({
+        where: { userId: req.user.id, currency },
+        defaults: { userId: req.user.id, currency, balance: "0.00" },
+      });
+    }
+    const accounts = await AccountBalance.findAll({ where: { userId: req.user.id }, order: [["currency", "ASC"]] });
+    const mainAccount = accounts.find((account) => account.currency === "NGN") || accounts[0];
+    return res.json({ success: true, data: {
+      accountBalance: mainAccount?.balance || "0.00",
+      accountCurrency: mainAccount?.currency || "NGN",
+      accountBalances: accounts.map(({ currency, balance }) => ({ currency, balance })),
+      walletBalance: wallet?.balance || "0.00",
+      walletCurrency: wallet?.currency || null,
+    } });
+  } catch (error) {
+    console.error("Error getting user balances:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to get balances" });
+  }
+};
+
+exports.transferAccountToWallet = async (req, res) => runBalanceTransfer(req, res, "account_to_wallet");
+exports.transferWalletToAccount = async (req, res) => runBalanceTransfer(req, res, "wallet_to_account");
+
+async function runBalanceTransfer(req, res, direction) {
+  try {
+    const data = await balanceTransferService.transfer({ userId: req.user.id, amount: req.body.amount, direction, idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey });
+    return res.json({ success: true, message: "Transfer successful", data: { accountBalance: data.accountBalance, walletBalance: data.walletBalance, currency: data.currency, replayed: data.replayed, transaction: {
+      reference: data.transaction.reference,
+      amount: data.transaction.amount,
+      type: data.transaction.type,
+      status: data.transaction.status,
+    } } });
+  } catch (error) {
+    if (error.statusCode && error.statusCode < 500) return res.status(error.statusCode).json({ success: false, message: error.message });
+    console.error("Balance transfer failed:", error.message);
+    return res.status(500).json({ success: false, message: "Transfer failed" });
+  }
+}
 
 /**
  * Initialize wallet for a user
@@ -148,6 +194,10 @@ exports.initializeWallet = async (req, res) => {
     let wallet = await Wallet.findOne({ where: { userId } });
 
     if (wallet) {
+      await AccountBalance.findOrCreate({
+        where: { userId, currency: wallet.currency },
+        defaults: { userId, currency: wallet.currency, balance: "0.00" },
+      });
       console.log(
         `User ${userId} already has a wallet with account ${wallet.accountNumber}`,
       );
@@ -193,6 +243,11 @@ exports.initializeWallet = async (req, res) => {
       balance: 0,
       currency,
       isActive: true,
+    });
+
+    await AccountBalance.findOrCreate({
+      where: { userId, currency },
+      defaults: { userId, currency, balance: "0.00" },
     });
 
     console.log(

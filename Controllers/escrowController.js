@@ -7,6 +7,7 @@ const { Op } = require("sequelize");
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const { formatAmount } = require("../utils/accountUtils");
+const { creditWallet } = require("../services/wallet.service");
 
 const {
   generateUPRN,
@@ -1375,41 +1376,30 @@ const refundEscrow = async (
   res
 ) => {
   try {
-    const {
-      transactionId,
-    } = req.body;
-
-    const escrow =
-      await Escrow.findByPk(
-        req.params.id
-      );
-
-    if (!escrow) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Escrow not found",
-      });
-    }
-
-    if (
-      escrow.status !==
-      "FUNDED"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Escrow cannot be refunded in its current state",
-      });
-    }
-
-    escrow.status =
-      "REFUNDED";
-
-    escrow.refundTransactionId =
-      transactionId;
-
-    await escrow.save();
+    const result = await sequelize.transaction(async (t) => {
+      const escrow = await Escrow.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!escrow) { const e = new Error("Escrow not found"); e.statusCode = 404; throw e; }
+      if (escrow.status !== "FUNDED" || escrow.refundTransactionId) {
+        const e = new Error("Escrow cannot be refunded in its current state"); e.statusCode = 400; throw e;
+      }
+      const refundAmount = Number(escrow.currentBalance || 0);
+      if (!(refundAmount > 0)) { const e = new Error("Escrow has no funds available to refund"); e.statusCode = 400; throw e; }
+      const buyerWallet = await Wallet.findOne({ where: { userId: escrow.recipientId, currency: escrow.currency, isActive: true }, transaction: t, lock: t.LOCK.UPDATE });
+      if (!buyerWallet) { const e = new Error("Buyer wallet not found for escrow currency"); e.statusCode = 404; throw e; }
+      const reference = generateEscrowTransferUPRN(escrow.recipientId, escrow.id, "refund");
+      const refundTransaction = await Transaction.create({
+        type: "escrow_refund", amount: refundAmount, total: refundAmount, fee: 0,
+        currency: escrow.currency, status: "completed", recipientId: escrow.recipientId,
+        recipientWallet: buyerWallet.id, reference, idempotencyKey: `escrow-refund-${escrow.id}`,
+        isUserAccountTransfer: false, paymentMethod: "wallet", paymentGateway: "Internal",
+        description: `Escrow refund for ${escrow.escrowUprn}`,
+        metadata: { escrowId: escrow.id, escrowUprn: escrow.escrowUprn, escrowType: "refund" },
+      }, { transaction: t });
+      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t });
+      await escrow.update({ status: "REFUNDED", refundTransactionId: refundTransaction.id, currentBalance: 0 }, { transaction: t });
+      return escrow;
+    });
+    const escrow = result;
 
     // ========================================================
     // 🔔 NOTIFICATION: REFUND
@@ -1473,10 +1463,9 @@ const refundEscrow = async (
       error
     );
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message:
-        "Failed to refund escrow",
+      message: error.statusCode ? error.message : "Failed to refund escrow",
     });
   }
 };

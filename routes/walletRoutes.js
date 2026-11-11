@@ -12,6 +12,11 @@ router.post("/initialize", walletController.initializeWallet);
 // Get wallet balance
 router.get("/balance", walletController.getBalance);
 
+// Account and wallet balances are separate; these operations are atomic.
+router.get("/balances", walletController.getBalances);
+router.post("/account-to-wallet", walletController.transferAccountToWallet);
+router.post("/wallet-to-account", walletController.transferWalletToAccount);
+
 // Get wallet details
 router.get("/details", walletController.getWalletDetails);
 
