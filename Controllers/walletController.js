@@ -30,7 +30,12 @@ const balanceTransferService = require("../services/balanceTransfer.service");
 
 exports.getBalances = async (req, res) => {
   try {
-    const wallet = await Wallet.findOne({ where: { userId: req.user.id, isActive: true }, order: [["id", "ASC"]] });
+    const wallet = await Wallet.findOne({ 
+      where: 
+      { userId: req.user.id, 
+      isActive: true 
+    },
+       order: [["id", "ASC"]] });
     const currencies = [...new Set(["NGN", wallet?.currency].filter(Boolean))];
     for (const currency of currencies) {
       await AccountBalance.findOrCreate({
@@ -48,6 +53,8 @@ exports.getBalances = async (req, res) => {
       accountBalances: accounts.map(({ currency, balance }) => ({ currency, balance })),
       walletBalance: wallet?.balance || "0.00",
       walletCurrency: wallet?.currency || null,
+        isActive: wallet.isActive,
+
     } });
   } catch (error) {
     console.error("Error getting user balances:", error.message);
