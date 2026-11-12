@@ -40,9 +40,11 @@ exports.getBalances = async (req, res) => {
     }
     const accounts = await AccountBalance.findAll({ where: { userId: req.user.id }, order: [["currency", "ASC"]] });
     const mainAccount = accounts.find((account) => account.currency === "NGN") || accounts[0];
-    return res.json({ success: true, data: {
+    return res.json({ success: true, 
+      data: {
       accountBalance: mainAccount?.balance || "0.00",
       accountCurrency: mainAccount?.currency || "NGN",
+       accountNumber: mainAccount.accountNumber,
       accountBalances: accounts.map(({ currency, balance }) => ({ currency, balance })),
       walletBalance: wallet?.balance || "0.00",
       walletCurrency: wallet?.currency || null,
