@@ -24,9 +24,20 @@ async function run() {
     SELECT user_id, currency FROM wallets
     ON CONFLICT (user_id, currency) DO NOTHING
   `);
-  await sequelize.query(`ALTER TYPE "enum_transactions_type" ADD VALUE IF NOT EXISTS 'account_to_wallet'`);
-  await sequelize.query(`ALTER TYPE "enum_transactions_type" ADD VALUE IF NOT EXISTS 'wallet_to_account'`);
-  await sequelize.query(`ALTER TYPE "enum_transactions_type" ADD VALUE IF NOT EXISTS 'escrow_refund'`);
+ await sequelize.query(`
+  ALTER TYPE "TransactionType"
+  ADD VALUE IF NOT EXISTS 'account_to_wallet'
+`);
+
+await sequelize.query(`
+  ALTER TYPE "TransactionType"
+  ADD VALUE IF NOT EXISTS 'wallet_to_account'
+`);
+
+await sequelize.query(`
+  ALTER TYPE "TransactionType"
+  ADD VALUE IF NOT EXISTS 'escrow_refund'
+`);
   console.log("Separate account balances are ready.");
 }
 
