@@ -44,7 +44,7 @@ exports.getBalances = async (req, res) => {
       data: {
       accountBalance: mainAccount?.balance || "0.00",
       accountCurrency: mainAccount?.currency || "NGN",
-       accountNumber: mainAccount.accountNumber,
+       accountNumber: wallet?.accountNumber || null,
       accountBalances: accounts.map(({ currency, balance }) => ({ currency, balance })),
       walletBalance: wallet?.balance || "0.00",
       walletCurrency: wallet?.currency || null,
