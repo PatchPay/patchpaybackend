@@ -28,4 +28,5 @@ const CardDetails = sequelize.define
 
 
 },
-     { tableName: "card_details", underscored: true, timestamps: true }); CardDetails.associate = () => {}; module.exports = CardDetails;
+     { tableName: "card_details", underscored: true, timestamps: true }); CardDetails.associate = () => {};
+      module.exports = CardDetails;
