@@ -14,6 +14,7 @@ const userRoutes = require("./routes/userRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const rfqRoutes = require("./routes/rfqRoutes");
+const cardDetails = require("./routes/carddetailsRoutes")
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const escrowRoutes = require("./routes/escrowRoutes");
 const escrowTransactionRoutes = require("./routes/escrowTransactionRoutes");
@@ -120,6 +121,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/rfq", rfqRoutes);
+app.use("/api/card", cardDetails)
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/escrow", escrowRoutes);
 app.use("/api/escrow-transactions", escrowTransactionRoutes);
