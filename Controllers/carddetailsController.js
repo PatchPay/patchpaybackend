@@ -1,5 +1,4 @@
-import CardDetails from "../models/Carddetails"; // Assuming CardDetails model is located in '../models/carddetails'
-
+const CardDetails = require("../models/Carddetails") 
 // Create a new card detail entry
 exports.createCardDetail = async (req, res) => {
   const { card_number, card_holder_name, expiry_date, cvv, billing_address } =
