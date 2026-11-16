@@ -183,7 +183,7 @@ const checkEscrowAction = (actionType) => {
             });
           }
 
-          if (escrow.status !== "FUNDED") {
+          if (!["FUNDED", "DISPUTED", "CANCELLED"].includes(escrow.status)) {
             return res.status(400).json({
               success: false,
               message: "Escrow cannot be refunded in its current state",

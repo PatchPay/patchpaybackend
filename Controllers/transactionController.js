@@ -2,6 +2,7 @@ const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
 const sequelize = require("../config/database");
 const { generateUPRN } = require("../utils/paymentUtils");
+const walletService = require("../services/wallet.service");
 
 
 const { Op } = require("sequelize");
@@ -116,15 +117,6 @@ const createTransaction = async (req, res) => {
       });
     }
 
-    if (Number(senderWallet.balance) < Number(amount)) {
-      await dbTransaction.rollback();
-
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance",
-      });
-    }
-
     const reference = await generateUPRN(senderWallet.userId, "transfer");
 
     const transaction = await Transaction.create(
@@ -145,19 +137,8 @@ const createTransaction = async (req, res) => {
       }
     );
 
-    senderWallet.balance =
-      Number(senderWallet.balance) - Number(amount);
-
-    recipientWallet.balance =
-      Number(recipientWallet.balance) + Number(amount);
-
-    await senderWallet.save({
-      transaction: dbTransaction,
-    });
-
-    await recipientWallet.save({
-      transaction: dbTransaction,
-    });
+    await walletService.debitWallet({ walletId: senderWallet.id, amount, transaction: dbTransaction });
+    await walletService.creditWallet({ walletId: recipientWallet.id, amount, transaction: dbTransaction });
 
     await dbTransaction.commit();
 

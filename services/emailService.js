@@ -150,26 +150,27 @@ const sendRFQNotificationEmail = async (recipient, sender, rfq) => {
           and respond to the request.
         </p>
 
-        <div style="
-          text-align: center;
-          margin: 30px 0;
-        ">
-          <a
-            href="${process.env.FRONTEND_URL}/rfq/${rfq.id}"
-            style="
-              display: inline-block;
-              padding: 12px 24px;
-              background-color: #111827;
-              color: #ffffff;
-              text-decoration: none;
-              border-radius: 6px;
-              font-weight: bold;
-            "
-          >
-            View RFQ
-          </a>
-        </div>
-
+       <div
+  style="
+    text-align: center;
+    margin: 30px 0;
+  "
+>
+  <a
+    href="https://play.google.com/store/apps/details?id=com.patchpay.app"
+    style="
+      display: inline-block;
+      padding: 12px 24px;
+      background-color: #111827;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    "
+  >
+    Open PatchPay
+  </a>
+</div>
         <p>
           Thank you for using PatchPay.
         </p>

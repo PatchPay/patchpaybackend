@@ -479,7 +479,8 @@ if (!isPinValid) {
         message: "Insufficient wallet balance. Please fund your wallet.",
         data: {
           requiredAmount: invoiceAmount,
-          availableBalance: walletBalance,
+          availableBalance: Number(buyerWallet.availableBalance),
+          balance: walletBalance,
           shortfall: Number(
             ((amountInKobo - balanceInKobo) / 100).toFixed(2)
           ),
@@ -755,8 +756,10 @@ if (!isPinValid) {
 
         wallet: {
           previousBalance: walletBalance,
+          previousAvailableBalance: buyerWallet.availableBalance,
           amountDeducted: invoiceAmount,
           currentBalance: Number(buyerWallet.balance),
+          availableBalance: Number(buyerWallet.availableBalance),
           currency: buyerWallet.currency,
         },
 

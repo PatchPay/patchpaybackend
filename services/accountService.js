@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { sequelize, Wallet, Transaction, User } = require('../models');
 const { generateAccountNumber, generateTransactionReference } = require('../utils/accountUtils');
+const walletBalanceService = require('./wallet.service');
 
 /**
  * Create or initialize a wallet for a user
@@ -33,6 +34,7 @@ exports.createWallet = async (userId, currency = 'NGN', accountType = 'personal'
       userId,
       accountNumber,
       balance: 0,
+      availableBalance: 0,
       currency,
       accountType
     });
@@ -112,11 +114,6 @@ exports.transferFunds = async (senderId, recipientAccountNumber, amount, descrip
       throw new Error('Sender wallet not found');
     }
 
-    // Check if sender has sufficient funds
-    if (senderWallet.balance < amount) {
-      throw new Error('Insufficient funds');
-    }
-
     // Get recipient's wallet by account number
     const recipientWallet = await Wallet.findOne({
       where: { accountNumber: recipientAccountNumber },
@@ -136,13 +133,8 @@ exports.transferFunds = async (senderId, recipientAccountNumber, amount, descrip
     // Generate transaction reference
     const reference = generateTransactionReference();
 
-    // Update sender's balance
-    senderWallet.balance -= amount;
-    await senderWallet.save({ transaction: t });
-
-    // Update recipient's balance
-    recipientWallet.balance += amount;
-    await recipientWallet.save({ transaction: t });
+    await walletBalanceService.debitWallet({ walletId: senderWallet.id, amount, transaction: t });
+    await walletBalanceService.creditWallet({ walletId: recipientWallet.id, amount, transaction: t });
 
     // Create transaction record
     const transaction = await Transaction.create(
@@ -202,8 +194,7 @@ exports.depositFunds = async (userId, amount, description = 'Deposit', externalR
     const reference = generateTransactionReference();
 
     // Update wallet balance
-    wallet.balance += amount;
-    await wallet.save({ transaction: t });
+    await walletBalanceService.creditWallet({ walletId: wallet.id, amount, transaction: t });
 
     // Create transaction record
     const transaction = await Transaction.create(
@@ -282,6 +273,7 @@ exports.getBalance = async (userId) => {
 
     return {
       balance: wallet.balance,
+      availableBalance: wallet.availableBalance,
       currency: wallet.currency,
       accountNumber: wallet.accountNumber
     };

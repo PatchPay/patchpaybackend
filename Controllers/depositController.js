@@ -2,7 +2,9 @@
 const DepositPayment = require("../models/DepositPayment");
 const Transaction = require("../models/Transaction");
 const sequelize = require("../config/database");
-const { creditAccountBalance, decimalAmount } = require("../services/accountBalance.service");
+const { decimalAmount } = require("../services/accountBalance.service");
+const Wallet = require("../models/Wallet");
+const { creditWallet } = require("../services/wallet.service");
 const axios = require("axios");
 const crypto = require("crypto");
 
@@ -11,7 +13,8 @@ async function creditSuccessfulDeposit(paymentId, gatewayData = {}) {
     const payment = await DepositPayment.findByPk(paymentId, { transaction: t, lock: t.LOCK.UPDATE });
     if (!payment) throw new Error("Deposit payment not found");
     if (payment.status === "successful" || payment.transactionId) {
-      return { payment, transaction: payment.transactionId ? await Transaction.findByPk(payment.transactionId, { transaction: t }) : null, alreadyProcessed: true };
+      const wallet = await Wallet.findOne({ where: { userId: payment.userId, currency: payment.currency, isActive: true }, transaction: t });
+      return { payment, wallet, transaction: payment.transactionId ? await Transaction.findByPk(payment.transactionId, { transaction: t }) : null, alreadyProcessed: true };
     }
 
     const providerData = gatewayData.data || gatewayData;
@@ -26,20 +29,22 @@ async function creditSuccessfulDeposit(paymentId, gatewayData = {}) {
       recipientId: payment.userId,
       reference: payment.transactionRef,
       idempotencyKey: payment.transactionRef,
-      description: "Deposit via Squad payment gateway to account balance",
+      description: "Deposit via Squad payment gateway to wallet",
       externalReference: squadRef,
       isUserAccountTransfer: false,
-      metadata: { balanceTarget: "account", accountBalanceCurrency: payment.currency },
+      metadata: { balanceTarget: "wallet", walletCurrency: payment.currency },
     }, { transaction: t });
 
-    await creditAccountBalance({ userId: payment.userId, currency: payment.currency, amount: payment.amount, transaction: t });
+    const wallet = await Wallet.findOne({ where: { userId: payment.userId, currency: payment.currency, isActive: true }, transaction: t, lock: t.LOCK.UPDATE });
+    if (!wallet) throw new Error("Active wallet not found for deposit currency");
+    const updatedWallet = await creditWallet({ walletId: wallet.id, amount: payment.amount, transaction: t });
     payment.status = "successful";
     payment.squadRef = squadRef;
     payment.gatewayResponse = gatewayData;
     payment.gatewayResponseCode = providerData.response_code || payment.gatewayResponseCode;
     payment.transactionId = transaction.id;
     await payment.save({ transaction: t });
-    return { payment, transaction, alreadyProcessed: false };
+    return { payment, wallet: updatedWallet, transaction, alreadyProcessed: false };
   });
 }
 
@@ -244,6 +249,7 @@ exports.handleWebhook = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Deposit processed successfully",
+      data: { wallet: { availableBalance: result.wallet.availableBalance, balance: result.wallet.balance, currency: result.wallet.currency } },
     });
   } catch (error) {
     console.error("Webhook processing error:", error);
@@ -360,11 +366,13 @@ exports.verifyDeposit = async (req, res) => {
       const transaction = payment.transactionId
         ? await Transaction.findByPk(payment.transactionId)
         : null;
+      const wallet = await Wallet.findOne({ where: { userId: payment.userId, currency: payment.currency, isActive: true } });
 
       return res.status(200).json({
         success: true,
         message: "Payment already verified",
         data: {
+          wallet: wallet ? { availableBalance: wallet.availableBalance, balance: wallet.balance, currency: wallet.currency } : null,
           payment: {
             id: payment.id,
             amount: payment.amount,
@@ -424,6 +432,7 @@ exports.verifyDeposit = async (req, res) => {
           success: true,
           message: "Payment verified successfully",
           data: {
+            wallet: { availableBalance: processed.wallet.availableBalance, balance: processed.wallet.balance, currency: processed.wallet.currency },
             payment: {
               id: payment.id,
               amount: payment.amount,

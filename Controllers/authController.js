@@ -71,6 +71,7 @@ const loginUser = async (req, res) => {
         userId: user.id,
         accountNumber,
         balance: 0,
+        availableBalance: 0,
         currency, // Use determined currency instead of hardcoded 'NGN'
         isActive: true,
         accountType: 'personal'
@@ -99,6 +100,7 @@ const loginUser = async (req, res) => {
     tokenExpiry.setHours(tokenExpiry.getHours() + 2);
 
     // Return user data and token
+    const currentWallet = await Wallet.findOne({ where: { userId: user.id, isActive: true }, order: [['id', 'ASC']] });
     res.json({
       success: true,
       data: {
@@ -112,7 +114,8 @@ const loginUser = async (req, res) => {
           phoneNumber: user.phoneNumber,
           uniqueId: user.uniqueId,
           status: user.status
-        }
+        },
+        wallet: currentWallet ? { availableBalance: currentWallet.availableBalance, balance: currentWallet.balance, currency: currentWallet.currency } : null
       }
     });
   } catch (error) {
