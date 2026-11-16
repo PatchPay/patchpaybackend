@@ -4,21 +4,41 @@ const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const sequelize = require('../config/database');
+const { debitWallet } = require('../services/wallet.service');
+const { decimalAmount } = require('../services/accountBalance.service');
 
 // Create a new escrow transaction
 exports.createTransaction = async (req, res) => {
   const transactionDb = await sequelize.transaction();
 
   try {
-    const { amount, type, metadata } = req.body;
+    const { type, metadata } = req.body;
+    let amount;
+    try { amount = decimalAmount(req.body.amount); } catch { await transactionDb.rollback(); return res.status(400).json({ success: false, message: 'A valid positive amount is required' }); }
+    if (type !== 'FUND') { await transactionDb.rollback(); return res.status(400).json({ success: false, message: 'Only escrow funding is supported by this endpoint' }); }
     const escrowId = req.params.id;
     const userId = req.user.id; // From auth middleware
+    const requestKey = String(req.get("Idempotency-Key") || req.body.idempotencyKey || "").trim();
+    if (requestKey.length < 8 || requestKey.length > 100) {
+      await transactionDb.rollback();
+      return res.status(400).json({ success: false, message: 'An idempotency key between 8 and 100 characters is required' });
+    }
 
     // Get the escrow details
-    const escrow = await Escrow.findByPk(escrowId, { transaction: transactionDb });
+    const escrow = await Escrow.findByPk(escrowId, { transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
     if (!escrow) {
       await transactionDb.rollback();
       return res.status(404).json({ success: false, message: 'Escrow not found' });
+    }
+    if (!["CREATED", "PARTIALLY_FUNDED"].includes(escrow.status)) {
+      await transactionDb.rollback();
+      return res.status(400).json({ success: false, message: 'Escrow is not open for funding' });
+    }
+    const idempotencyKey = `escrow-fund-${escrow.id}-${requestKey}`;
+    const prior = await Transaction.findOne({ where: { idempotencyKey }, transaction: transactionDb });
+    if (prior) {
+      await transactionDb.commit();
+      return res.status(200).json({ success: true, repeated: true, data: { transaction: prior, currentBalance: escrow.currentBalance, status: escrow.status } });
     }
 
     // Get user's wallet
@@ -26,23 +46,27 @@ exports.createTransaction = async (req, res) => {
       userId,
       currency: escrow.currency,
       isActive: true
-    }, transaction: transactionDb });
+    }, transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
 
     if (!userWallet) {
       await transactionDb.rollback();
       return res.status(404).json({ success: false, message: 'User wallet not found' });
     }
 
-    // Check if user has sufficient balance
-    if (userWallet.balance < amount) {
+    if (String(userId) !== String(escrow.recipientId)) {
       await transactionDb.rollback();
-      return res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
+      return res.status(403).json({ success: false, message: 'Only the escrow buyer can fund it' });
     }
 
     // Calculate balances
-    const currentBalance = escrow.currentBalance || 0;
-    const newBalance = type === 'FUND' ? currentBalance + amount : currentBalance - amount;
-    const outstandingBalance = escrow.amount - newBalance;
+    const currentCents = Math.round(Number(escrow.currentBalance || 0) * 100);
+    const amountCents = Math.round(Number(amount) * 100);
+    if (currentCents + amountCents > Math.round(Number(escrow.amount) * 100)) {
+      await transactionDb.rollback();
+      return res.status(400).json({ success: false, message: 'Funding exceeds the remaining escrow amount' });
+    }
+    const newBalance = ((currentCents + amountCents) / 100).toFixed(2);
+    const outstandingBalance = ((Math.round(Number(escrow.amount) * 100) - currentCents - amountCents) / 100).toFixed(2);
 
     // Generate transaction reference
     const timestamp = Date.now().toString();
@@ -52,7 +76,7 @@ exports.createTransaction = async (req, res) => {
     // Create wallet transaction
     const walletTransaction = await Transaction.create({
       type: 'transfer',
-      amount: amount,
+      amount,
       fee: 0,
       total: amount,
       currency: escrow.currency,
@@ -61,6 +85,7 @@ exports.createTransaction = async (req, res) => {
       senderId: userId,
       recipientId: escrow.recipientId,
       reference: transactionReference,
+      idempotencyKey,
       description: `Escrow funding: ${escrow.escrowUprn}`,
       isUserAccountTransfer: true,
       metadata: {
@@ -78,8 +103,8 @@ exports.createTransaction = async (req, res) => {
       amount,
       currency: escrow.currency,
       transactionReference,
-      balanceAfterTransaction: newBalance,
-      outstandingBalanceAfterTransaction: outstandingBalance,
+      balanceAfterTransaction: Number(newBalance),
+      outstandingBalanceAfterTransaction: Number(outstandingBalance),
       originalAmount: escrow.amount,
       status: 'COMPLETED',
       metadata: {
@@ -89,11 +114,10 @@ exports.createTransaction = async (req, res) => {
     }, { transaction: transactionDb });
 
     // Update wallet balance
-    userWallet.balance -= Number(amount);
-    await userWallet.save({ transaction: transactionDb });
+    await debitWallet({ walletId: userWallet.id, amount, transaction: transactionDb, debitAvailable: false });
 
     // Update escrow balance and store the transaction reference
-    await escrow.update({ currentBalance: newBalance, status: outstandingBalance === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED' }, { transaction: transactionDb });
+    await escrow.update({ currentBalance: newBalance, status: Number(outstandingBalance) === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED' }, { transaction: transactionDb });
 
     // Save both transactions
     await transactionDb.commit();

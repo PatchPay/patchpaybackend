@@ -141,6 +141,7 @@ const registerUser = async (req, res) => {
     res.status(201).json({
       message: "User registered successfully. OTP sent to email.",
       user: userResponse,
+      wallet: { availableBalance: "0.00", balance: "0.00" },
       requiresVerification: true,
     });
   } catch (error) {
@@ -263,6 +264,7 @@ const loginUser = async (req, res) => {
         userId: user.id,
         accountNumber,
         balance: 0,
+        availableBalance: 0,
         currency,
         isActive: true,
       });
@@ -298,10 +300,12 @@ const loginUser = async (req, res) => {
     delete userResponse.password;
 
     console.log(`✅ Login successful for user: ${email}`);
+    const walletResponse = await Wallet.findOne({ where: { userId: user.id, isActive: true }, order: [["id", "ASC"]] });
     res.status(200).json({
       message: "Login successful",
       token,
       user: userResponse,
+      wallet: walletResponse ? { availableBalance: walletResponse.availableBalance, balance: walletResponse.balance, currency: walletResponse.currency } : null,
     });
   } catch (error) {
     console.error("❌ Login Error:", error);
@@ -386,6 +390,7 @@ const verifyEmail = async (req, res) => {
         userId: user.id,
         accountNumber,
         balance: 0,
+        availableBalance: 0,
         currency,
         isActive: true,
       });
@@ -403,9 +408,10 @@ const verifyEmail = async (req, res) => {
 
     console.log(`✅ Email verified successfully for user: ${email}`);
 
-    res
-      .status(200)
-      .json({ message: "Email verified successfully. You can now log in." });
+    res.status(200).json({
+      message: "Email verified successfully. You can now log in.",
+      wallet: userWallet ? { availableBalance: userWallet.availableBalance, balance: userWallet.balance, currency: userWallet.currency } : null,
+    });
   } catch (error) {
     console.error("❌ Email verification error:", error);
     res
@@ -515,7 +521,11 @@ const user = await User.findByPk(req.user.id,{
     }
 
     console.log("✅ User profile found:", user.email);
-    res.status(200).json(user);
+    const wallet = await Wallet.findOne({ where: { userId: user.id, isActive: true }, order: [["id", "ASC"]] });
+    res.status(200).json({
+      ...user.toJSON(),
+      wallet: wallet ? { availableBalance: wallet.availableBalance, balance: wallet.balance, currency: wallet.currency } : null,
+    });
   } catch (error) {
     console.error("❌ Error fetching user profile:", error);
     res.status(500).json({ message: "Error fetching user profile" });

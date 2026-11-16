@@ -46,6 +46,7 @@ async function transfer({ userId, amount, direction, idempotencyKey }) {
         return {
           accountBalance: prior.metadata.accountBalanceAfter,
           walletBalance: prior.metadata.walletBalanceAfter,
+          availableBalance: prior.metadata.availableBalanceAfter || prior.metadata.walletBalanceAfter,
           currency: prior.currency,
           transaction: prior,
           replayed: true,
@@ -61,6 +62,7 @@ async function transfer({ userId, amount, direction, idempotencyKey }) {
     account = await AccountBalance.findByPk(account.id, { transaction: t, lock: t.LOCK.UPDATE });
 
     const walletCents = Math.round(Number(wallet.balance) * 100);
+    const availableCents = Math.round(Number(wallet.availableBalance) * 100);
     const accountCents = Math.round(Number(account.balance) * 100);
     const fromAccount = direction === "account_to_wallet";
     const sourceCents = fromAccount ? accountCents : walletCents;
@@ -71,8 +73,9 @@ async function transfer({ userId, amount, direction, idempotencyKey }) {
 
     const nextAccount = accountCents + (fromAccount ? -cents : cents);
     const nextWallet = walletCents + (fromAccount ? cents : -cents);
+    const nextAvailable = availableCents + (fromAccount ? cents : -cents);
     await account.update({ balance: asAmount(nextAccount) }, { transaction: t });
-    await wallet.update({ balance: asAmount(nextWallet) }, { transaction: t });
+    await wallet.update({ balance: asAmount(nextWallet), availableBalance: asAmount(nextAvailable) }, { transaction: t });
 
     const reference = `BAL-${crypto.randomUUID()}`;
     const transaction = await Transaction.create({
@@ -90,10 +93,10 @@ async function transfer({ userId, amount, direction, idempotencyKey }) {
       idempotencyKey: requestKey || reference,
       isUserAccountTransfer: false,
       description: fromAccount ? "Account balance transferred to wallet" : "Wallet balance transferred to account",
-      metadata: { balanceTransfer: direction, accountBalanceAfter: asAmount(nextAccount), walletBalanceAfter: asAmount(nextWallet) },
+      metadata: { balanceTransfer: direction, accountBalanceAfter: asAmount(nextAccount), walletBalanceAfter: asAmount(nextWallet), availableBalanceAfter: asAmount(nextAvailable) },
     }, { transaction: t });
 
-    return { accountBalance: asAmount(nextAccount), walletBalance: asAmount(nextWallet), currency: wallet.currency, transaction, replayed: false };
+    return { accountBalance: asAmount(nextAccount), walletBalance: asAmount(nextWallet), availableBalance: asAmount(nextAvailable), currency: wallet.currency, transaction, replayed: false };
   });
 }
 

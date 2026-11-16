@@ -8,6 +8,7 @@ const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const { formatAmount } = require("../utils/accountUtils");
 const { creditWallet } = require("../services/wallet.service");
+const { decimalAmount } = require("../services/accountBalance.service");
 
 const {
   generateUPRN,
@@ -1379,27 +1380,42 @@ const refundEscrow = async (
     const result = await sequelize.transaction(async (t) => {
       const escrow = await Escrow.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
       if (!escrow) { const e = new Error("Escrow not found"); e.statusCode = 404; throw e; }
-      if (escrow.status !== "FUNDED" || escrow.refundTransactionId) {
+      const requestKey = String(req.get("Idempotency-Key") || req.body.idempotencyKey || "").trim();
+      if (requestKey.length < 8 || requestKey.length > 100) {
+        const e = new Error("An idempotency key between 8 and 100 characters is required"); e.statusCode = 400; throw e;
+      }
+      const idempotencyKey = `escrow-refund-${escrow.id}-${requestKey}`;
+      const prior = await Transaction.findOne({ where: { idempotencyKey }, transaction: t });
+      if (prior) return { escrow, alreadyProcessed: true };
+      if (!["FUNDED", "DISPUTED", "CANCELLED"].includes(escrow.status)) {
         const e = new Error("Escrow cannot be refunded in its current state"); e.statusCode = 400; throw e;
       }
-      const refundAmount = Number(escrow.currentBalance || 0);
-      if (!(refundAmount > 0)) { const e = new Error("Escrow has no funds available to refund"); e.statusCode = 400; throw e; }
+      const remainingCents = Math.round(Number(escrow.currentBalance || 0) * 100);
+      if (remainingCents <= 0) { const e = new Error("Escrow has no funds available to refund"); e.statusCode = 400; throw e; }
+      let refundAmount;
+      try { refundAmount = req.body.amount == null ? (remainingCents / 100).toFixed(2) : decimalAmount(req.body.amount); }
+      catch { const e = new Error("Refund amount must be a valid positive amount"); e.statusCode = 400; throw e; }
+      const refundCents = Math.round(Number(refundAmount) * 100);
+      if (refundCents > remainingCents) { const e = new Error("Refund amount exceeds the remaining escrow balance"); e.statusCode = 400; throw e; }
       const buyerWallet = await Wallet.findOne({ where: { userId: escrow.recipientId, currency: escrow.currency, isActive: true }, transaction: t, lock: t.LOCK.UPDATE });
       if (!buyerWallet) { const e = new Error("Buyer wallet not found for escrow currency"); e.statusCode = 404; throw e; }
       const reference = generateEscrowTransferUPRN(escrow.recipientId, escrow.id, "refund");
       const refundTransaction = await Transaction.create({
         type: "escrow_refund", amount: refundAmount, total: refundAmount, fee: 0,
         currency: escrow.currency, status: "completed", recipientId: escrow.recipientId,
-        recipientWallet: buyerWallet.id, reference, idempotencyKey: `escrow-refund-${escrow.id}`,
+        recipientWallet: buyerWallet.id, reference, idempotencyKey,
         isUserAccountTransfer: false, paymentMethod: "wallet", paymentGateway: "Internal",
         description: `Escrow refund for ${escrow.escrowUprn}`,
         metadata: { escrowId: escrow.id, escrowUprn: escrow.escrowUprn, escrowType: "refund" },
       }, { transaction: t });
-      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t });
-      await escrow.update({ status: "REFUNDED", refundTransactionId: refundTransaction.id, currentBalance: 0 }, { transaction: t });
-      return escrow;
+      // Escrow funding already reduced the internal wallet balance; a refund
+      // restores only that balance and must not increase availableBalance.
+      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t, creditAvailable: false });
+      const nextBalance = ((remainingCents - refundCents) / 100).toFixed(2);
+      await escrow.update({ status: refundCents === remainingCents ? "REFUNDED" : escrow.status, refundTransactionId: refundTransaction.id, currentBalance: nextBalance }, { transaction: t });
+      return { escrow, alreadyProcessed: false };
     });
-    const escrow = result;
+    const { escrow } = result;
 
     // ========================================================
     // 🔔 NOTIFICATION: REFUND
@@ -1451,8 +1467,7 @@ const refundEscrow = async (
     return res.json({
       success: true,
 
-      message:
-        "Escrow refunded successfully",
+      message: result.alreadyProcessed ? "Refund already processed" : "Escrow refunded successfully",
 
       data:
         escrow,

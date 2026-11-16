@@ -52,8 +52,10 @@ exports.getBalances = async (req, res) => {
        accountNumber: wallet?.accountNumber || null,
       accountBalances: accounts.map(({ currency, balance }) => ({ currency, balance })),
       walletBalance: wallet?.balance || "0.00",
+      balance: wallet?.balance || "0.00",
+      availableBalance: wallet?.availableBalance || "0.00",
       walletCurrency: wallet?.currency || null,
-        isActive: wallet.isActive,
+        isActive: wallet?.isActive || false,
 
     } });
   } catch (error) {
@@ -68,7 +70,7 @@ exports.transferWalletToAccount = async (req, res) => runBalanceTransfer(req, re
 async function runBalanceTransfer(req, res, direction) {
   try {
     const data = await balanceTransferService.transfer({ userId: req.user.id, amount: req.body.amount, direction, idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey });
-    return res.json({ success: true, message: "Transfer successful", data: { accountBalance: data.accountBalance, walletBalance: data.walletBalance, currency: data.currency, replayed: data.replayed, transaction: {
+    return res.json({ success: true, message: "Transfer successful", data: { accountBalance: data.accountBalance, walletBalance: data.walletBalance, balance: data.walletBalance, availableBalance: data.availableBalance, currency: data.currency, replayed: data.replayed, transaction: {
       reference: data.transaction.reference,
       amount: data.transaction.amount,
       type: data.transaction.type,
@@ -216,9 +218,9 @@ exports.initializeWallet = async (req, res) => {
         data: {
           accountNumber: wallet.accountNumber,
           balance: formatAmount(wallet.balance, wallet.currency),
+          availableBalance: formatAmount(wallet.availableBalance, wallet.currency),
           rawBalance: wallet.balance,
-          availableBalance: formatAmount(wallet.balance, wallet.currency),
-          rawAvailableBalance: wallet.balance,
+          rawAvailableBalance: wallet.availableBalance,
           currency: wallet.currency,
           isActive: wallet.isActive,
         },
@@ -250,6 +252,7 @@ exports.initializeWallet = async (req, res) => {
       userId,
       accountNumber,
       balance: 0,
+      availableBalance: 0,
       currency,
       isActive: true,
     });
@@ -270,9 +273,9 @@ exports.initializeWallet = async (req, res) => {
       data: {
         accountNumber: wallet.accountNumber,
         balance: formatAmount(wallet.balance, wallet.currency),
+        availableBalance: formatAmount(wallet.availableBalance, wallet.currency),
         rawBalance: wallet.balance,
-        availableBalance: formatAmount(wallet.balance, wallet.currency),
-        rawAvailableBalance: wallet.balance,
+        rawAvailableBalance: wallet.availableBalance,
         currency: wallet.currency,
         isActive: wallet.isActive,
       },
@@ -308,6 +311,7 @@ exports.getBalance = async (req, res) => {
       success: true,
       data: {
         balance: formatAmount(wallet.balance, wallet.currency),
+        availableBalance: formatAmount(wallet.availableBalance, wallet.currency),
         rawBalance: wallet.balance,
         currency: wallet.currency,
       },
@@ -529,6 +533,7 @@ exports.getWalletDetails = async (req, res) => {
       data: {
         accountNumber: wallet.accountNumber,
         balance: Number(wallet.balance),
+        availableBalance: Number(wallet.availableBalance),
         // rawBalance: Number(wallet.balance),
         // availableBalance: Number(availableBalance),
         // rawAvailableBalance: Number(availableBalance),

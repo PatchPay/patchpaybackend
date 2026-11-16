@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const WithdrawalPayment = require("../models/WithdrawalPayment");
 const Transaction = require("../models/Transaction");
 const Wallet = require("../models/Wallet");
+const walletService = require("./wallet.service");
 const squadApi = require("../utils/squadApiUtils");
 const bankService = require("./bankService");
 const { generateUPRN, validateNameMatch } = require("../utils/paymentUtils");
@@ -63,7 +64,7 @@ exports.initiateWithdrawal = async ({
       throw new Error("Selected bank is not available for payouts");
     }
 
-    const wallet = await Wallet.findOne({ where: { userId: user.id }, transaction: transactionDb });
+    const wallet = await Wallet.findOne({ where: { userId: user.id }, transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
     if (!wallet) {
       throw new Error("Wallet not found");
     }
@@ -138,11 +139,10 @@ exports.initiateWithdrawal = async ({
         transactionRef,
         flowType,
       },
-    });
+    }, { transaction: transactionDb });
 
 
-    wallet.balance -= Number(amount);
-    await wallet.save({ transaction: transactionDb });
+    await walletService.debitWallet({ walletId: wallet.id, amount, transaction: transactionDb });
 
     const withdrawalPayload = {
       amount: Number(amount),
@@ -202,27 +202,34 @@ exports.verifyWithdrawalStatus = async (transactionRef) => {
 
   try {
     withdrawalPayment.gatewayResponse = statusResponse;
-    withdrawalPayment.status = normalized;
-    await withdrawalPayment.save({ transaction: transactionDb });
+    const lockedWithdrawal = await WithdrawalPayment.findByPk(withdrawalPayment.id, { transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
+    if (!lockedWithdrawal) throw new Error("Withdrawal record not found");
+    if (["successful", "failed", "reversed"].includes(lockedWithdrawal.status)) {
+      const existingTransaction = await Transaction.findOne({ where: sequelize.where(sequelize.json("metadata.transactionRef"), transactionRef), transaction: transactionDb });
+      await transactionDb.commit();
+      return { withdrawalPayment: lockedWithdrawal, transaction: existingTransaction };
+    }
+    lockedWithdrawal.gatewayResponse = statusResponse;
+    lockedWithdrawal.status = normalized;
+    await lockedWithdrawal.save({ transaction: transactionDb });
 
     const transaction = await Transaction.findOne({ where: sequelize.where(sequelize.json("metadata.transactionRef"), transactionRef), transaction: transactionDb });
     if (transaction) {
       transaction.status = normalized === "successful" ? "completed" : normalized;
       await transaction.save({ transaction: transactionDb });
 
-      if (["failed", "reversed"].includes(normalized) && !withdrawalPayment.refunded) {
+      if (["failed", "reversed"].includes(normalized) && !lockedWithdrawal.refunded) {
         const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
-          wallet.balance += transaction.amount;
-          await wallet.save({ transaction: transactionDb });
-          withdrawalPayment.refunded = true;
-          await withdrawalPayment.save({ transaction: transactionDb });
+          await walletService.creditWallet({ walletId: wallet.id, amount: transaction.amount, transaction: transactionDb });
+          lockedWithdrawal.refunded = true;
+          await lockedWithdrawal.save({ transaction: transactionDb });
         }
       }
     }
 
     await transactionDb.commit();
-    return { withdrawalPayment, transaction };
+    return { withdrawalPayment: lockedWithdrawal, transaction };
   } catch (error) {
     await transactionDb.rollback();
     throw error;
@@ -244,7 +251,7 @@ exports.processWithdrawalWebhook = async (event) => {
   const transactionDb = await sequelize.transaction();
 
   try {
-    const withdrawalPayment = await WithdrawalPayment.findOne({ where: { transactionRef }, transaction: transactionDb });
+    const withdrawalPayment = await WithdrawalPayment.findOne({ where: { transactionRef }, transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
     if (!withdrawalPayment) {
       throw new Error("Withdrawal not found");
     }
@@ -266,8 +273,7 @@ exports.processWithdrawalWebhook = async (event) => {
       if (["failed", "reversed"].includes(status) && !withdrawalPayment.refunded) {
         const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
-          wallet.balance += transaction.amount;
-          await wallet.save({ transaction: transactionDb });
+          await walletService.creditWallet({ walletId: wallet.id, amount: transaction.amount, transaction: transactionDb });
           withdrawalPayment.refunded = true;
           await withdrawalPayment.save({ transaction: transactionDb });
         }
