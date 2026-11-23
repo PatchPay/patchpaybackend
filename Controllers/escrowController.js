@@ -1408,9 +1408,9 @@ const refundEscrow = async (
         description: `Escrow refund for ${escrow.escrowUprn}`,
         metadata: { escrowId: escrow.id, escrowUprn: escrow.escrowUprn, escrowType: "refund" },
       }, { transaction: t });
-      // Escrow funding already reduced the internal wallet balance; a refund
-      // restores only that balance and must not increase availableBalance.
-      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t, creditAvailable: false });
+      // Escrow funding reduced both wallet balances, so return the funds to
+      // both when the escrow is refunded.
+      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t });
       const nextBalance = ((remainingCents - refundCents) / 100).toFixed(2);
       await escrow.update({ status: refundCents === remainingCents ? "REFUNDED" : escrow.status, refundTransactionId: refundTransaction.id, currentBalance: nextBalance }, { transaction: t });
       return { escrow, alreadyProcessed: false };

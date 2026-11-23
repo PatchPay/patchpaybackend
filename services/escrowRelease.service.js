@@ -4,7 +4,7 @@ const Quote = require("../models/Quote");
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const EscrowTransaction = require("../models/EscrowTransaction");
-const { creditWallet, debitAvailableBalance } = require("./wallet.service");
+const { creditWallet } = require("./wallet.service");
 const { generateEscrowTransferUPRN } = require("../utils/paymentUtils");
 
 /**
@@ -105,9 +105,8 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
       lock: t.LOCK.UPDATE,
     });
     if (!buyerWallet) throw httpError(404, "Buyer wallet not found for escrow currency");
-    // The buyer's internal balance was debited during funding. Release only
-    // removes the escrow-held amount from the displayed available balance.
-    await debitAvailableBalance({ walletId: buyerWallet.id, amount: releaseAmount, transaction: t });
+    // Escrow funds were removed from both buyer balances when funded. Releasing
+    // them only credits the seller wallet.
 
     // 4. Create the wallet-level release transaction (money entering seller).
     const releaseReference = generateEscrowTransferUPRN(

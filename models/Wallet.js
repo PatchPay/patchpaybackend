@@ -39,14 +39,14 @@ const Wallet = sequelize.define(
       field: "account_number",
     },
 
-    // Internal uncommitted wallet funds used for spend validation.
+    // Total wallet funds, including amounts reserved by pending withdrawals.
     balance: {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,
       defaultValue: 0,
     },
 
-    // User-visible entitlement; escrow funding does not reduce it until release.
+    // Funds currently available for new spending; pending debits are reserved here.
     availableBalance: {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,

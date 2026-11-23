@@ -172,6 +172,7 @@ const internalTransfer = async ({
     return {
       transaction: existing,
       senderBalance: senderWallet?.balance,
+      senderAvailableBalance: senderWallet?.availableBalance,
       repeated: true,
     };
   }
@@ -315,6 +316,7 @@ const internalTransfer = async ({
       transaction: senderTransaction,
       receiverTransaction,
       senderBalance: debitedWallet.balance,
+      senderAvailableBalance: debitedWallet.availableBalance,
       repeated: false,
     };
   } catch (error) {
@@ -325,7 +327,10 @@ const internalTransfer = async ({
           idempotencyKey: stableKey,
         },
       });
-      if (duplicate) return { transaction: duplicate, repeated: true };
+      if (duplicate) {
+        const senderWallet = await walletService.getActiveWalletForUser(user.id);
+        return { transaction: duplicate, senderBalance: senderWallet?.balance, senderAvailableBalance: senderWallet?.availableBalance, repeated: true };
+      }
     }
     throw error;
   }

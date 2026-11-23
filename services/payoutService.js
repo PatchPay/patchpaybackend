@@ -71,8 +71,8 @@ exports.initiateWithdrawal = async ({
     if (wallet.currency !== "NGN") {
       throw new Error("Withdrawals are only supported in NGN");
     }
-    if (Number(wallet.balance) < Number(amount)) {
-      throw new Error("Insufficient balance");
+    if (Number(wallet.availableBalance) < Number(amount)) {
+      throw new Error("Insufficient available balance");
     }
 
     if (idempotencyKey) {
@@ -138,11 +138,12 @@ exports.initiateWithdrawal = async ({
         },
         transactionRef,
         flowType,
+        walletReservationStatus: "reserved",
       },
     }, { transaction: transactionDb });
 
 
-    await walletService.debitWallet({ walletId: wallet.id, amount, transaction: transactionDb });
+    await walletService.reserveWalletBalance({ walletId: wallet.id, amount, transaction: transactionDb });
 
     const withdrawalPayload = {
       amount: Number(amount),
@@ -161,8 +162,16 @@ exports.initiateWithdrawal = async ({
     transaction.externalReference = nipReference;
 
     const payoutStatus = normalizeStatus(squadResponse?.data?.status || "processing");
-    withdrawalPayment.status = payoutStatus === "successful" ? "successful" : "processing";
-    transaction.status = payoutStatus === "successful" ? "completed" : "processing";
+    withdrawalPayment.status = payoutStatus;
+    transaction.status = payoutStatus === "successful" ? "completed" : payoutStatus;
+    if (payoutStatus === "successful") {
+      await walletService.settleWalletReservation({ walletId: wallet.id, amount, transaction: transactionDb });
+      transaction.metadata = { ...transaction.metadata, reservationSettled: true, walletReservationStatus: "settled" };
+    } else if (["failed", "reversed"].includes(payoutStatus)) {
+      await walletService.releaseWalletReservation({ walletId: wallet.id, amount, transaction: transactionDb });
+      transaction.metadata = { ...transaction.metadata, walletReservationStatus: "released" };
+      withdrawalPayment.refunded = true;
+    }
 
     await withdrawalPayment.save({ transaction: transactionDb });
     await transaction.save({ transaction: transactionDb });
@@ -218,10 +227,19 @@ exports.verifyWithdrawalStatus = async (transactionRef) => {
       transaction.status = normalized === "successful" ? "completed" : normalized;
       await transaction.save({ transaction: transactionDb });
 
-      if (["failed", "reversed"].includes(normalized) && !lockedWithdrawal.refunded) {
+      if (normalized === "successful" && !transaction.metadata?.reservationSettled) {
+        const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
+        if (wallet) {
+          await walletService.settleWalletReservation({ walletId: wallet.id, amount: transaction.total, transaction: transactionDb });
+          transaction.metadata = { ...transaction.metadata, reservationSettled: true, walletReservationStatus: "settled" };
+          await transaction.save({ transaction: transactionDb });
+        }
+      } else if (["failed", "reversed"].includes(normalized) && !lockedWithdrawal.refunded) {
         const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
-          await walletService.creditWallet({ walletId: wallet.id, amount: transaction.amount, transaction: transactionDb });
+          await walletService.releaseWalletReservation({ walletId: wallet.id, amount: transaction.total, transaction: transactionDb });
+          transaction.metadata = { ...transaction.metadata, walletReservationStatus: "released" };
+          await transaction.save({ transaction: transactionDb });
           lockedWithdrawal.refunded = true;
           await lockedWithdrawal.save({ transaction: transactionDb });
         }
@@ -270,10 +288,19 @@ exports.processWithdrawalWebhook = async (event) => {
       transaction.status = status === "successful" ? "completed" : status;
       await transaction.save({ transaction: transactionDb });
 
-      if (["failed", "reversed"].includes(status) && !withdrawalPayment.refunded) {
+      if (status === "successful" && !transaction.metadata?.reservationSettled) {
+        const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb, lock: transactionDb.LOCK.UPDATE });
+        if (wallet) {
+          await walletService.settleWalletReservation({ walletId: wallet.id, amount: transaction.total, transaction: transactionDb });
+          transaction.metadata = { ...transaction.metadata, reservationSettled: true, walletReservationStatus: "settled" };
+          await transaction.save({ transaction: transactionDb });
+        }
+      } else if (["failed", "reversed"].includes(status) && !withdrawalPayment.refunded) {
         const wallet = await Wallet.findByPk(transaction.senderWallet, { transaction: transactionDb });
         if (wallet) {
-          await walletService.creditWallet({ walletId: wallet.id, amount: transaction.amount, transaction: transactionDb });
+          await walletService.releaseWalletReservation({ walletId: wallet.id, amount: transaction.total, transaction: transactionDb });
+          transaction.metadata = { ...transaction.metadata, walletReservationStatus: "released" };
+          await transaction.save({ transaction: transactionDb });
           withdrawalPayment.refunded = true;
           await withdrawalPayment.save({ transaction: transactionDb });
         }

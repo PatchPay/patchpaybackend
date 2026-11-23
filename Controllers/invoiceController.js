@@ -11,6 +11,7 @@ const {
 
 const { generateUPRN } = require("../utils/paymentUtils");
 const { createNotification } = require("../services/notificationService");
+const { debitWallet } = require("../services/wallet.service");
 
 const bcrypt = require("bcryptjs");
 
@@ -452,14 +453,14 @@ if (!isPinValid) {
     // 6. Validate payment amount using minor units
     const invoiceAmount = Number(invoice.amount);
     const walletBalance = Number(buyerWallet.balance);
+    const spendableBalance = Number(buyerWallet.availableBalance);
 
     const amountInKobo = Math.round(invoiceAmount * 100);
-    const balanceInKobo = Math.round(walletBalance * 100);
-
     if (
       !Number.isFinite(invoiceAmount) ||
       invoiceAmount <= 0 ||
-      !Number.isFinite(walletBalance)
+      !Number.isFinite(walletBalance) ||
+      !Number.isFinite(spendableBalance)
     ) {
       await transactionDb.rollback();
 
@@ -470,7 +471,7 @@ if (!isPinValid) {
     }
 
     // 7. Insufficient balance
-    if (balanceInKobo < amountInKobo) {
+    if (Math.round(spendableBalance * 100) < amountInKobo) {
       await transactionDb.rollback();
 
       return res.status(400).json({
@@ -482,7 +483,7 @@ if (!isPinValid) {
           availableBalance: Number(buyerWallet.availableBalance),
           balance: walletBalance,
           shortfall: Number(
-            ((amountInKobo - balanceInKobo) / 100).toFixed(2)
+            ((amountInKobo - Math.round(spendableBalance * 100)) / 100).toFixed(2)
           ),
           currency: invoice.currency,
         },
@@ -522,13 +523,8 @@ if (!isPinValid) {
     const escrowReference = `${paymentReference}-ESC`;
 
     // 11. Deduct money from buyer wallet
-    buyerWallet.balance = (
-      (balanceInKobo - amountInKobo) / 100
-    ).toFixed(2);
-
-    await buyerWallet.save({
-      transaction: transactionDb,
-    });
+    await debitWallet({ walletId: buyerWallet.id, amount: invoiceAmount.toFixed(2), transaction: transactionDb });
+    await buyerWallet.reload({ transaction: transactionDb });
 
     // 12. Create invoice payment transaction
     const invoiceTransaction = await Transaction.create(
