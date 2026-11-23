@@ -36,6 +36,7 @@ const debitWallet = async ({ walletId, amount, transaction, debitAvailable = tru
         isActive: true,
         balance: { [Op.gte]: value },
         ...(debitAvailable ? { availableBalance: { [Op.gte]: value } } : {}),
+        ...(!debitAvailable ? { [Op.and]: Wallet.sequelize.where(Wallet.sequelize.literal(`balance - ${value}`), Op.gte, Wallet.sequelize.col("available_balance")) } : {}),
       },
       transaction,
       returning: true, // works on Postgres/MSSQL; ignored on MySQL/SQLite
@@ -101,10 +102,61 @@ const debitAvailableBalance = async ({ walletId, amount, transaction }) => {
   return affectedRows?.[0] || Wallet.findByPk(walletId, { transaction });
 };
 
+// Reserve funds for an outgoing operation that is awaiting an external result.
+// The total balance remains unchanged until settleWalletReservation is called.
+const reserveWalletBalance = async ({ walletId, amount, transaction }) => {
+  const value = amountText(amount);
+  const [affectedCount] = await Wallet.update(
+    { availableBalance: Wallet.sequelize.literal(`available_balance - ${value}`) },
+    { where: { id: walletId, isActive: true, availableBalance: { [Op.gte]: value } }, transaction },
+  );
+  if (!affectedCount) {
+    const error = new Error("Insufficient available balance");
+    error.statusCode = 400;
+    throw error;
+  }
+  return Wallet.findByPk(walletId, { transaction });
+};
+
+// Settle a prior reservation: consume it from total balance without touching
+// availableBalance a second time.
+const settleWalletReservation = async ({ walletId, amount, transaction }) => {
+  const value = amountText(amount);
+  const [affectedCount] = await Wallet.update(
+    { balance: Wallet.sequelize.literal(`balance - ${value}`) },
+    { where: { id: walletId, isActive: true, balance: { [Op.gte]: value }, [Op.and]: Wallet.sequelize.where(Wallet.sequelize.literal(`balance - ${value}`), Op.gte, Wallet.sequelize.col("available_balance")) }, transaction },
+  );
+  if (!affectedCount) {
+    const error = new Error("Insufficient wallet balance to settle reservation");
+    error.statusCode = 400;
+    throw error;
+  }
+  return Wallet.findByPk(walletId, { transaction });
+};
+
+// Release a prior reservation after failure. Call while holding the
+// transaction row lock so duplicate failure events cannot release twice.
+const releaseWalletReservation = async ({ walletId, amount, transaction }) => {
+  const value = amountText(amount);
+  const [affectedCount] = await Wallet.update(
+    { availableBalance: Wallet.sequelize.literal(`available_balance + ${value}`) },
+    { where: { id: walletId, isActive: true, [Op.and]: Wallet.sequelize.where(Wallet.sequelize.literal(`available_balance + ${value}`), Op.lte, Wallet.sequelize.col("balance")) }, transaction },
+  );
+  if (!affectedCount) {
+    const error = new Error("Wallet not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  return Wallet.findByPk(walletId, { transaction });
+};
+
 module.exports = {
   creditWallet,
   debitWallet,
   debitAvailableBalance,
+  reserveWalletBalance,
+  settleWalletReservation,
+  releaseWalletReservation,
   getActiveWalletByAccountNumber,
   getActiveWalletForUser,
 };

@@ -114,7 +114,7 @@ exports.createTransaction = async (req, res) => {
     }, { transaction: transactionDb });
 
     // Update wallet balance
-    await debitWallet({ walletId: userWallet.id, amount, transaction: transactionDb, debitAvailable: false });
+    await debitWallet({ walletId: userWallet.id, amount, transaction: transactionDb });
 
     // Update escrow balance and store the transaction reference
     await escrow.update({ currentBalance: newBalance, status: Number(outstandingBalance) === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED' }, { transaction: transactionDb });

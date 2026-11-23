@@ -478,6 +478,7 @@ exports.transferFunds = async (req, res) => {
         currency: result.transaction.currency,
         status: result.transaction.status,
         senderBalance: result.senderBalance,
+        availableBalance: result.senderAvailableBalance,
       },
     });
   } catch (error) {
@@ -504,39 +505,13 @@ exports.getWalletDetails = async (req, res) => {
       });
     }
 
-    // Calculate available balance by subtracting pending outgoing transactions
-    const pendingTransactions = await Transaction.findAll({
-      where: {
-        [Op.or]: [
-          { senderId: userId, status: "pending" },
-          { recipientId: userId, status: "pending" },
-        ],
-      },
-    });
-
-    let pendingAmount = 0;
-    pendingTransactions.forEach((transaction) => {
-      // If user is sender, subtract the amount
-      if (
-        transaction.senderId &&
-        transaction.senderId.toString() === userId.toString()
-      ) {
-        pendingAmount += transaction.amount;
-      }
-      // We don't add pending incoming funds to available balance
-    });
-
-    const availableBalance = Math.max(0, wallet.balance - pendingAmount);
-
     return res.status(200).json({
       success: true,
       data: {
         accountNumber: wallet.accountNumber,
+        walletBalance: Number(wallet.balance),
         balance: Number(wallet.balance),
         availableBalance: Number(wallet.availableBalance),
-        // rawBalance: Number(wallet.balance),
-        // availableBalance: Number(availableBalance),
-        // rawAvailableBalance: Number(availableBalance),
         currency: wallet.currency,
         isActive: wallet.isActive,
         createdAt: wallet.createdAt,

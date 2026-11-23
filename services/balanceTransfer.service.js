@@ -65,7 +65,7 @@ async function transfer({ userId, amount, direction, idempotencyKey }) {
     const availableCents = Math.round(Number(wallet.availableBalance) * 100);
     const accountCents = Math.round(Number(account.balance) * 100);
     const fromAccount = direction === "account_to_wallet";
-    const sourceCents = fromAccount ? accountCents : walletCents;
+    const sourceCents = fromAccount ? accountCents : availableCents;
     if (sourceCents < cents) {
       const error = new Error(`Insufficient ${fromAccount ? "account" : "wallet"} balance`);
       error.statusCode = 400; throw error;
