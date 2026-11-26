@@ -60,7 +60,10 @@ model Wallet {
   userId        Int               @map("user_id")
   accountType   WalletAccountType @default(personal) @map("account_type")
   accountNumber String            @unique @map("account_number") @db.VarChar(50)
+  // Total wallet ledger balance, including funds reserved for escrow and pending debits.
   balance       Decimal           @default(0) @db.Decimal(15, 2)
+  // Spendable funds after reservations; kept in sync with the wallets table.
+  availableBalance Decimal        @default(0) @map("available_balance") @db.Decimal(15, 2)
   currency      WalletCurrency
   isActive      Boolean           @default(true) @map("is_active")
   createdAt     DateTime          @default(now()) @map("created_at")

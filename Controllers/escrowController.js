@@ -7,7 +7,7 @@ const { Op } = require("sequelize");
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const { formatAmount } = require("../utils/accountUtils");
-const { creditWallet } = require("../services/wallet.service");
+const { releaseWalletReservation } = require("../services/wallet.service");
 const { decimalAmount } = require("../services/accountBalance.service");
 
 const {
@@ -1408,9 +1408,9 @@ const refundEscrow = async (
         description: `Escrow refund for ${escrow.escrowUprn}`,
         metadata: { escrowId: escrow.id, escrowUprn: escrow.escrowUprn, escrowType: "refund" },
       }, { transaction: t });
-      // Escrow funding reduced both wallet balances, so return the funds to
-      // both when the escrow is refunded.
-      await creditWallet({ walletId: buyerWallet.id, amount: refundAmount, transaction: t });
+      // Return the held amount to spendable funds. The ledger balance never
+      // decreased when the escrow was funded, so refunding must not credit it.
+      await releaseWalletReservation({ walletId: buyerWallet.id, amount: refundAmount, transaction: t });
       const nextBalance = ((remainingCents - refundCents) / 100).toFixed(2);
       await escrow.update({ status: refundCents === remainingCents ? "REFUNDED" : escrow.status, refundTransactionId: refundTransaction.id, currentBalance: nextBalance }, { transaction: t });
       return { escrow, alreadyProcessed: false };

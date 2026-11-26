@@ -54,6 +54,7 @@ exports.getBalances = async (req, res) => {
       walletBalance: wallet?.balance || "0.00",
       balance: wallet?.balance || "0.00",
       availableBalance: wallet?.availableBalance || "0.00",
+      heldBalance: wallet ? (Number(wallet.balance) - Number(wallet.availableBalance)).toFixed(2) : "0.00",
       walletCurrency: wallet?.currency || null,
         isActive: wallet?.isActive || false,
 
@@ -312,6 +313,7 @@ exports.getBalance = async (req, res) => {
       data: {
         balance: formatAmount(wallet.balance, wallet.currency),
         availableBalance: formatAmount(wallet.availableBalance, wallet.currency),
+        heldBalance: formatAmount(Number(wallet.balance) - Number(wallet.availableBalance), wallet.currency),
         rawBalance: wallet.balance,
         currency: wallet.currency,
       },
