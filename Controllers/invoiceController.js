@@ -11,7 +11,7 @@ const {
 
 const { generateUPRN } = require("../utils/paymentUtils");
 const { createNotification } = require("../services/notificationService");
-const { debitWallet } = require("../services/wallet.service");
+const { reserveWalletBalance } = require("../services/wallet.service");
 
 const bcrypt = require("bcryptjs");
 
@@ -522,8 +522,9 @@ if (!isPinValid) {
 
     const escrowReference = `${paymentReference}-ESC`;
 
-    // 11. Deduct money from buyer wallet
-    await debitWallet({ walletId: buyerWallet.id, amount: invoiceAmount.toFixed(2), transaction: transactionDb });
+    // 11. Reserve the payment while it is held in escrow. The wallet ledger
+    // balance stays unchanged until release; availableBalance drops now.
+    await reserveWalletBalance({ walletId: buyerWallet.id, amount: invoiceAmount.toFixed(2), transaction: transactionDb });
     await buyerWallet.reload({ transaction: transactionDb });
 
     // 12. Create invoice payment transaction
@@ -752,10 +753,11 @@ if (!isPinValid) {
 
         wallet: {
           previousBalance: walletBalance,
-          previousAvailableBalance: buyerWallet.availableBalance,
+          previousAvailableBalance: spendableBalance,
           amountDeducted: invoiceAmount,
           currentBalance: Number(buyerWallet.balance),
           availableBalance: Number(buyerWallet.availableBalance),
+          heldBalance: Number((Number(buyerWallet.balance) - Number(buyerWallet.availableBalance)).toFixed(2)),
           currency: buyerWallet.currency,
         },
 

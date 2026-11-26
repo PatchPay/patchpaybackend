@@ -4,7 +4,7 @@ const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const sequelize = require('../config/database');
-const { debitWallet } = require('../services/wallet.service');
+const { reserveWalletBalance } = require('../services/wallet.service');
 const { decimalAmount } = require('../services/accountBalance.service');
 
 // Create a new escrow transaction
@@ -113,8 +113,8 @@ exports.createTransaction = async (req, res) => {
       }
     }, { transaction: transactionDb });
 
-    // Update wallet balance
-    await debitWallet({ walletId: userWallet.id, amount, transaction: transactionDb });
+    // Reserve the funds in the wallet until the escrow is released or refunded.
+    await reserveWalletBalance({ walletId: userWallet.id, amount, transaction: transactionDb });
 
     // Update escrow balance and store the transaction reference
     await escrow.update({ currentBalance: newBalance, status: Number(outstandingBalance) === 0 ? 'FUNDED' : 'PARTIALLY_FUNDED' }, { transaction: transactionDb });

@@ -4,7 +4,7 @@ const Quote = require("../models/Quote");
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const EscrowTransaction = require("../models/EscrowTransaction");
-const { creditWallet } = require("./wallet.service");
+const { creditWallet, settleWalletReservation } = require("./wallet.service");
 const { generateEscrowTransferUPRN } = require("../utils/paymentUtils");
 
 /**
@@ -105,8 +105,8 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
       lock: t.LOCK.UPDATE,
     });
     if (!buyerWallet) throw httpError(404, "Buyer wallet not found for escrow currency");
-    // Escrow funds were removed from both buyer balances when funded. Releasing
-    // them only credits the seller wallet.
+    // Consume the buyer's held ledger funds now that ownership moves to the
+    // seller. availableBalance was reduced at funding time and stays unchanged.
 
     // 4. Create the wallet-level release transaction (money entering seller).
     const releaseReference = generateEscrowTransferUPRN(
@@ -141,6 +141,12 @@ const confirmReceiptAndRelease = async (escrowId, buyerId) => {
     // 5. Atomically credit the seller wallet (balance = balance + amount).
     await creditWallet({
       walletId: sellerWallet.id,
+      amount: releaseAmount,
+      transaction: t,
+    });
+
+    await settleWalletReservation({
+      walletId: buyerWallet.id,
       amount: releaseAmount,
       transaction: t,
     });

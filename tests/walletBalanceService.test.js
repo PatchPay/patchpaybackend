@@ -60,6 +60,52 @@ test("pending withdrawal reserves available balance without changing total balan
   }
 });
 
+test("escrow funding holds funds, release consumes the hold, and refund restores availability", async () => {
+  const originalLiteral = Wallet.sequelize.literal;
+  const originalUpdate = Wallet.update;
+  const originalFind = Wallet.findByPk;
+  const updates = [];
+  try {
+    Wallet.sequelize.literal = (sql) => sql;
+    Wallet.update = async (values, options) => {
+      updates.push({ values, options });
+      return [1];
+    };
+    Wallet.findByPk = async () => ({ id: 7, balance: "15000.00", availableBalance: "10000.00" });
+
+    await walletService.reserveWalletBalance({ walletId: 7, amount: "5000.00", transaction: {} });
+    assert.deepEqual(updates[0].values, { availableBalance: "available_balance - 5000.00" });
+    assert.equal(updates[0].options.where.availableBalance[require("sequelize").Op.gte], "5000.00");
+
+    await walletService.settleWalletReservation({ walletId: 7, amount: "5000.00", transaction: {} });
+    assert.deepEqual(updates[1].values, { balance: "balance - 5000.00" });
+    assert.equal("availableBalance" in updates[1].values, false);
+
+    await walletService.releaseWalletReservation({ walletId: 7, amount: "5000.00", transaction: {} });
+    assert.deepEqual(updates[2].values, { availableBalance: "available_balance + 5000.00" });
+  } finally {
+    Wallet.sequelize.literal = originalLiteral;
+    Wallet.update = originalUpdate;
+    Wallet.findByPk = originalFind;
+  }
+});
+
+test("spending more than the post-escrow available balance is rejected", async () => {
+  const originalLiteral = Wallet.sequelize.literal;
+  const originalUpdate = Wallet.update;
+  try {
+    Wallet.sequelize.literal = (sql) => sql;
+    Wallet.update = async () => [0];
+    await assert.rejects(
+      walletService.debitWallet({ walletId: 7, amount: "7000.00", transaction: {} }),
+      (error) => error.statusCode === 400 && error.message === "Insufficient balance",
+    );
+  } finally {
+    Wallet.sequelize.literal = originalLiteral;
+    Wallet.update = originalUpdate;
+  }
+});
+
 test("successful withdrawal settlement reduces total balance only", async () => {
   const originalLiteral = Wallet.sequelize.literal;
   const originalUpdate = Wallet.update;
